@@ -70,13 +70,18 @@ internal static class SelfTests
         {
             using var logo = BrandResources.LoadLogoBitmap();
             using var icon = BrandResources.LoadApplicationIcon();
-            using var form = new SettingsForm(
-                UserSettings.CreateDefault(),
+            using var chineseForm = new SettingsForm(
+                new UserSettings(UserSettings.DefaultRadius, Localizer.Chinese),
                 icon,
                 _ => true);
-            var controls = EnumerateControls(form).ToArray();
+            using var englishForm = new SettingsForm(
+                new UserSettings(UserSettings.DefaultRadius, Localizer.English),
+                icon,
+                _ => true);
+            var controls = EnumerateControls(chineseForm).ToArray();
             return logo is { Width: > 0, Height: > 0 } &&
-                   form.Text.Contains("寸镜", StringComparison.Ordinal) &&
+                   chineseForm.Text.Contains("寸镜", StringComparison.Ordinal) &&
+                   englishForm.Text.Contains("PierceView", StringComparison.Ordinal) &&
                    controls.OfType<NumericUpDown>().Count() == 1 &&
                    controls.OfType<ComboBox>().Count() == 1 &&
                    controls.OfType<Button>().Count() == 2;
