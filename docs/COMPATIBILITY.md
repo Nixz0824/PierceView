@@ -1,4 +1,4 @@
-# WindowPortal 兼容性说明
+# QL eye 兼容性说明
 
 ## 支持良好的类型
 
@@ -9,7 +9,7 @@
 
 ## 无效果、黑屏或只显示部分画面的类型
 
-| 类型 | 原因 | v7 行为 |
+| 类型 | 原因 | 0.7.1 行为 |
 |---|---|---|
 | League of Legends、Valorant、Riot/Vanguard、EAC、BattlEye、FACEIT 等 | 游戏/反作弊可能监视全局 hooks、窗口样式和覆盖层；兼容性与账号风险不可通过普通功能测试证明 | 默认禁止 DWM 注册、样式修改和 Z-order 操作 |
 | UAC、登录、锁屏、Ctrl+Alt+Del、安全凭据页面 | 位于安全桌面或受系统访问控制保护 | 无法访问且明确不尝试绕过 |
