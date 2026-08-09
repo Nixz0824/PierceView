@@ -1,5 +1,15 @@
 # 寸镜 / PierceView 1.0 安全模型
 
+## 报告安全问题 / Reporting a security issue
+
+请不要在公开 Issue 中发布利用细节、令牌、私人桌面内容或可执行样本。优先使用 GitHub 仓库 **Security → Report a vulnerability** 提交私密报告；如果该入口尚未启用，只创建一条不含敏感细节的 Issue，请求建立私密沟通渠道。
+
+Do not post exploit details, tokens, private desktop content, or executable samples in a public issue. Prefer **Security → Report a vulnerability** in the GitHub repository. If private reporting is not enabled yet, open an issue only to request a private contact channel and omit all sensitive details.
+
+报告应包含受影响版本与 SHA256、Windows 版本、最小复现条件、潜在影响，以及问题是否需要游戏或安全软件参与。请勿使用真实游戏账号进行高风险验证。
+
+Include the affected version and SHA256, Windows version, minimal conditions, potential impact, and whether games or security software are involved. Do not use a real game account for risky verification.
+
 ## 当前结论
 
 寸镜是本地、普通用户权限的窗口工具。它不注入 DLL、不读取或写入其他进程内存、不创建远程线程、不安装驱动、不模拟输入、不联网、不采集遥测、不设置 Windows 自启动，也不安装全局低级键盘或鼠标钩子。

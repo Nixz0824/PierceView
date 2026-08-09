@@ -1,8 +1,33 @@
+# Build and test output
 bin/
 obj/
+artifacts/
+TestResults/
+*.trx
+*.binlog
+
+# IDE and local tooling
 .vs/
 *.user
 *.suo
-artifacts/
 .tools/
 recovered/
+
+# Local diagnostics and desktop captures
+diagnostics/
+screenshots/
+*.log
+*.dmp
+
+# Local secrets and signing material
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.snk
+*.key
+
+# OS metadata
+Thumbs.db
+.DS_Store
