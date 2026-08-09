@@ -1,0 +1,71 @@
+name: 缺陷报告 / Bug report
+description: 报告可复现的视觉、交互、恢复或托盘问题 / Report a reproducible visual, interaction, restore, or tray problem
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请先移除截图和日志中的私人内容；不要使用真实游戏账号测试反作弊冲突。
+        Thanks for helping. Remove private content from screenshots and logs, and do not test anti-cheat conflicts with a real game account.
+  - type: input
+    id: version
+    attributes:
+      label: 版本与 SHA256 / Version and SHA256
+      placeholder: PierceView 1.0.0-rc.1 · SHA256 …
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 系统环境 / Environment
+      description: Windows 版本、缩放比例、多显示器与 GPU / Windows version, scaling, monitors, and GPU
+    validations:
+      required: true
+  - type: input
+    id: apps
+    attributes:
+      label: 窗口组合 / Window combination
+      description: 当前窗口与后台窗口的应用及版本 / Foreground and background apps and versions
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤 / Reproduction steps
+      placeholder: "1. …\n2. 按住 F8 / Hold F8\n3. …"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果 / Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果 / Actual result
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: 问题类型 / Category
+      options:
+        - 视觉、黑帧、频闪或双圆 / Visual, black frame, flicker, or duplicate portal
+        - 点击、滚动或拖放 / Click, scroll, or drag-and-drop
+        - 窗口层级或恢复 / Z-order or restore
+        - 托盘、设置或语言 / Tray, settings, or language
+        - 兼容性或安全软件 / Compatibility or security software
+        - 其他 / Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私确认 / Privacy check
+      options:
+        - label: 我已移除私人聊天、账号、文件名、令牌和本机路径。 / I removed private chats, accounts, filenames, tokens, and local paths.
+          required: true
+        - label: 若涉及游戏或反作弊，我没有使用真实账号进行风险测试。 / If games or anti-cheat are involved, I did not use a real account for risky testing.
+          required: true

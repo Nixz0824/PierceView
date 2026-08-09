@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480" viewBox="0 0 1200 480" role="img" aria-labelledby="title desc">
+  <title id="title">寸镜 PierceView — 按住 F8 查看并操作后台窗口</title>
+  <desc id="desc">Bilingual monochrome hero showing two overlapping application windows and a circular portal into the window behind.</desc>
+
+  <rect width="1200" height="480" rx="28" fill="#F4F1E8"/>
+  <path d="M0 28A28 28 0 0 1 28 0h1144a28 28 0 0 1 28 28v424a28 28 0 0 1-28 28H28A28 28 0 0 1 0 452Z" fill="none" stroke="#111111" stroke-width="2"/>
+  <path d="M56 416H684" stroke="#111111" stroke-width="2"/>
+
+  <rect x="56" y="48" width="378" height="34" rx="17" fill="#111111"/>
+  <text x="245" y="70" fill="#F4F1E8" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="13" font-weight="700" text-anchor="middle" letter-spacing="0.8">WINDOWS TRAY UTILITY · WINDOWS 托盘工具</text>
+
+  <text x="56" y="173" fill="#111111" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="82" font-weight="800">寸镜</text>
+  <text x="56" y="222" fill="#111111" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="38" font-weight="650" letter-spacing="0.8">PierceView</text>
+
+  <text x="56" y="292" fill="#111111" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="27" font-weight="650">按住 F8，直接查看并操作后台窗口。</text>
+  <text x="56" y="330" fill="#4E4C47" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="24">Hold F8 to view and interact with the window behind.</text>
+
+  <g font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="15" font-weight="650">
+    <text x="56" y="390" fill="#111111">v1.0.0-rc.1</text>
+    <circle cx="174" cy="385" r="3" fill="#111111"/>
+    <text x="190" y="390" fill="#111111">Windows 10 / 11</text>
+    <circle cx="331" cy="385" r="3" fill="#111111"/>
+    <text x="347" y="390" fill="#111111">单层稳定内核 / Stable single-layer core</text>
+  </g>
+
+  <g transform="translate(704 38)">
+    <text x="205" y="18" fill="#4E4C47" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="14" font-weight="700" text-anchor="middle" letter-spacing="1">紧贴后方一层 / ONE LAYER BEHIND</text>
+
+    <rect x="16" y="40" width="358" height="258" rx="20" fill="#FFFDF7" stroke="#111111" stroke-width="7"/>
+    <path d="M20 94H370" stroke="#111111" stroke-width="7"/>
+    <circle cx="48" cy="68" r="8" fill="#111111"/>
+    <circle cx="75" cy="68" r="8" fill="#111111"/>
+    <circle cx="102" cy="68" r="8" fill="#111111"/>
+    <text x="58" y="202" fill="#111111" font-family="Segoe UI, Arial, sans-serif" font-size="76" font-weight="800">ABC</text>
+    <path d="M57 231H259M57 260H309" stroke="#111111" stroke-width="8" stroke-linecap="round"/>
+
+    <rect x="89" y="122" width="370" height="278" rx="22" fill="#111111" stroke="#111111" stroke-width="7"/>
+    <path d="M93 180H455V144a18 18 0 0 0-18-18H111a18 18 0 0 0-18 18Z" fill="#FFFDF7"/>
+    <path d="M93 180H455" stroke="#111111" stroke-width="7"/>
+    <circle cx="123" cy="152" r="8" fill="#111111"/>
+    <circle cx="150" cy="152" r="8" fill="#111111"/>
+    <circle cx="177" cy="152" r="8" fill="#111111"/>
+
+    <circle cx="276" cy="286" r="84" fill="#FFFDF7" stroke="#F4F1E8" stroke-width="6"/>
+    <text x="191" y="312" fill="#111111" font-family="Segoe UI, Arial, sans-serif" font-size="70" font-weight="800">ABC</text>
+    <path d="M196 246H351M196 334H351" stroke="#111111" stroke-width="7" stroke-linecap="round"/>
+
+    <g transform="translate(0 356)">
+      <rect x="0" y="0" width="70" height="48" rx="10" fill="#FFFDF7" stroke="#111111" stroke-width="3"/>
+      <text x="35" y="32" fill="#111111" font-family="Segoe UI, Arial, sans-serif" font-size="23" font-weight="800" text-anchor="middle">F8</text>
+      <path d="M80 24H125" stroke="#111111" stroke-width="3" stroke-linecap="round"/>
+      <path d="m116 15 10 9-10 9" fill="none" stroke="#111111" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="140" y="20" fill="#FFFDF7" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="15" font-weight="700">按住开启 · 松开恢复</text>
+      <text x="140" y="41" fill="#D8D4CA" font-family="Segoe UI, Arial, sans-serif" font-size="14">Hold to open · release to restore</text>
+    </g>
+  </g>
+</svg>

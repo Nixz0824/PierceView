@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="390" viewBox="0 0 1200 390" role="img" aria-labelledby="title desc">
+  <title id="title">寸镜 PierceView 双语工作流程</title>
+  <desc id="desc">Four steps: stay in the current app, hold F8, view scroll and click, then release F8 to restore.</desc>
+
+  <rect width="1200" height="390" rx="24" fill="#F4F1E8"/>
+  <rect x="1" y="1" width="1198" height="388" rx="23" fill="none" stroke="#111111" stroke-width="2"/>
+  <text x="48" y="60" fill="#111111" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="28" font-weight="800">如何工作 / HOW IT WORKS</text>
+  <text x="1152" y="58" fill="#4E4C47" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="14" font-weight="700" text-anchor="end">一按即看，松开即回 / HOLD TO PEEK, RELEASE TO RETURN</text>
+
+  <g font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif">
+    <g transform="translate(48 92)">
+      <rect width="244" height="188" rx="18" fill="#FFFDF7" stroke="#111111" stroke-width="2"/>
+      <circle cx="28" cy="28" r="16" fill="#111111"/>
+      <text x="28" y="34" fill="#FFFDF7" font-size="16" font-weight="800" text-anchor="middle">1</text>
+      <rect x="77" y="38" width="92" height="66" rx="9" fill="none" stroke="#111111" stroke-width="4"/>
+      <path d="M79 60H167" stroke="#111111" stroke-width="4"/>
+      <circle cx="91" cy="49" r="3" fill="#111111"/>
+      <circle cx="102" cy="49" r="3" fill="#111111"/>
+      <text x="122" y="142" fill="#111111" font-size="20" font-weight="750" text-anchor="middle">停留当前窗口</text>
+      <text x="122" y="168" fill="#4E4C47" font-size="16" text-anchor="middle">Stay in your current app</text>
+    </g>
+
+    <path d="M304 186H326" stroke="#111111" stroke-width="3" stroke-linecap="round"/>
+    <path d="m318 178 9 8-9 8" fill="none" stroke="#111111" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <g transform="translate(338 92)">
+      <rect width="244" height="188" rx="18" fill="#FFFDF7" stroke="#111111" stroke-width="2"/>
+      <circle cx="28" cy="28" r="16" fill="#111111"/>
+      <text x="28" y="34" fill="#FFFDF7" font-size="16" font-weight="800" text-anchor="middle">2</text>
+      <rect x="79" y="42" width="86" height="58" rx="11" fill="#111111"/>
+      <text x="122" y="80" fill="#FFFDF7" font-family="Segoe UI, Arial, sans-serif" font-size="27" font-weight="800" text-anchor="middle">F8</text>
+      <text x="122" y="142" fill="#111111" font-size="20" font-weight="750" text-anchor="middle">按住 F8</text>
+      <text x="122" y="168" fill="#4E4C47" font-size="16" text-anchor="middle">Hold F8</text>
+    </g>
+
+    <path d="M594 186H616" stroke="#111111" stroke-width="3" stroke-linecap="round"/>
+    <path d="m608 178 9 8-9 8" fill="none" stroke="#111111" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <g transform="translate(628 92)">
+      <rect width="244" height="188" rx="18" fill="#111111" stroke="#111111" stroke-width="2"/>
+      <circle cx="28" cy="28" r="16" fill="#FFFDF7"/>
+      <text x="28" y="34" fill="#111111" font-size="16" font-weight="800" text-anchor="middle">3</text>
+      <circle cx="122" cy="71" r="43" fill="#FFFDF7"/>
+      <path d="M96 58H148M96 73H140M96 88H133" stroke="#111111" stroke-width="5" stroke-linecap="round"/>
+      <text x="122" y="142" fill="#FFFDF7" font-size="20" font-weight="750" text-anchor="middle">查看 · 滚动 · 点击</text>
+      <text x="122" y="168" fill="#D8D4CA" font-size="16" text-anchor="middle">View · Scroll · Click</text>
+    </g>
+
+    <path d="M884 186H906" stroke="#111111" stroke-width="3" stroke-linecap="round"/>
+    <path d="m898 178 9 8-9 8" fill="none" stroke="#111111" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <g transform="translate(918 92)">
+      <rect width="234" height="188" rx="18" fill="#FFFDF7" stroke="#111111" stroke-width="2"/>
+      <circle cx="28" cy="28" r="16" fill="#111111"/>
+      <text x="28" y="34" fill="#FFFDF7" font-size="16" font-weight="800" text-anchor="middle">4</text>
+      <path d="M86 47h62a14 14 0 0 1 14 14v39H86Z" fill="none" stroke="#111111" stroke-width="4"/>
+      <path d="M119 39 99 59l20 20M101 59h59" fill="none" stroke="#111111" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="117" y="142" fill="#111111" font-size="20" font-weight="750" text-anchor="middle">松开即恢复</text>
+      <text x="117" y="168" fill="#4E4C47" font-size="16" text-anchor="middle">Release to restore</text>
+    </g>
+  </g>
+
+  <rect x="48" y="308" width="1104" height="50" rx="12" fill="#111111"/>
+  <text x="600" y="339" fill="#FFFDF7" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="18" font-weight="700" text-anchor="middle">拖住内容 → 松开 F8 → 放到当前窗口　/　Drag content → release F8 → drop in the current app</text>
+</svg>

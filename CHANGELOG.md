@@ -2,6 +2,18 @@
 
 本项目采用 [Semantic Versioning](https://semver.org/)；RC 表示等待真实桌面验收的候选版。
 
+## [Unreleased]
+
+### Documentation
+
+- 重构 GitHub 仓库主页，加入简体中文/English 双语产品说明、下载校验、兼容性边界与路线图。
+- 加入双语静态 SVG 主视觉和操作流程图，并完成宽屏与 328 px 窄屏渲染检查。
+- 加入双语贡献指南、Issue 表单和 Pull Request 模板；扩充 `.gitignore`，避免本机诊断、桌面截图、环境文件与签名材料被误提交。
+
+### Runtime
+
+- 无运行时代码或候选发布物变更；`1.0.0-rc.1` 的 EXE 与 ZIP 哈希保持不变。
+
 ## [1.0.0-rc.1] - 2026-08-10
 
 ### Changed
