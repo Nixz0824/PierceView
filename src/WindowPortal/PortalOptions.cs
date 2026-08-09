@@ -5,41 +5,46 @@ namespace WindowPortal;
 internal sealed record PortalOptions(
     int Radius,
     int PollMilliseconds,
+    bool RadiusWasSpecified,
+    bool PollWasSpecified,
     nint? ProbeWindow,
     nint? InspectWindow,
     NativeMethods.Point? InspectPoint,
     int ProbeDurationMilliseconds,
     bool SelfTest,
     bool ListWindows,
-    bool CompatibilityReport,
     bool ShowVersion,
-    bool ShowHelp)
+    bool ShowHelp,
+    int? TraySmokeTestMilliseconds)
 {
-    public static PortalOptions Parse(string[] args)
+    internal static PortalOptions Parse(string[] args)
     {
         var radius = 180;
         var pollMilliseconds = 16;
+        var radiusWasSpecified = false;
+        var pollWasSpecified = false;
         nint? probeWindow = null;
         nint? inspectWindow = null;
         NativeMethods.Point? inspectPoint = null;
         var probeDurationMilliseconds = 1500;
         var selfTest = false;
         var listWindows = false;
-        var compatibilityReport = false;
         var showVersion = false;
         var showHelp = false;
+        int? traySmokeTestMilliseconds = null;
 
         for (var index = 0; index < args.Length; index++)
         {
             var argument = args[index];
-
             switch (argument)
             {
                 case "--radius":
-                    radius = ParseInt(NextValue(args, ref index, argument), argument, 32, 2000);
+                    radius = ParseInt(NextValue(args, ref index, argument), argument, 64, 400);
+                    radiusWasSpecified = true;
                     break;
                 case "--poll-ms":
-                    pollMilliseconds = ParseInt(NextValue(args, ref index, argument), argument, 4, 1000);
+                    pollMilliseconds = ParseInt(NextValue(args, ref index, argument), argument, 8, 100);
+                    pollWasSpecified = true;
                     break;
                 case "--probe-hwnd":
                     probeWindow = ParseWindowHandle(NextValue(args, ref index, argument));
@@ -57,7 +62,7 @@ internal sealed record PortalOptions(
                         NextValue(args, ref index, argument),
                         argument,
                         100,
-                        60_000);
+                        60000);
                     break;
                 case "--self-test":
                     selfTest = true;
@@ -65,15 +70,19 @@ internal sealed record PortalOptions(
                 case "--list-windows":
                     listWindows = true;
                     break;
-                case "--compatibility-report":
-                    compatibilityReport = true;
-                    break;
                 case "--version":
                     showVersion = true;
                     break;
-                case "--help":
+                case "--tray-smoke-test-ms":
+                    traySmokeTestMilliseconds = ParseInt(
+                        NextValue(args, ref index, argument),
+                        argument,
+                        250,
+                        10000);
+                    break;
                 case "-h":
                 case "/?":
+                case "--help":
                     showHelp = true;
                     break;
                 default:
@@ -84,16 +93,16 @@ internal sealed record PortalOptions(
         var exclusiveModeCount =
             (selfTest ? 1 : 0) +
             (listWindows ? 1 : 0) +
-            (compatibilityReport ? 1 : 0) +
             (showVersion ? 1 : 0) +
-            (probeWindow is not null ? 1 : 0) +
-            (inspectWindow is not null ? 1 : 0);
+            (probeWindow.HasValue ? 1 : 0) +
+            (inspectWindow.HasValue ? 1 : 0);
         if (exclusiveModeCount > 1)
         {
-            throw new ArgumentException("--self-test、--list-windows、--compatibility-report、--version、--probe-hwnd 和 --inspect-hwnd 不能同时使用。");
+            throw new ArgumentException(
+                "--self-test、--list-windows、--version、--probe-hwnd 和 --inspect-hwnd 不能同时使用。");
         }
 
-        if (inspectPoint is not null && inspectWindow is null)
+        if (inspectPoint.HasValue && !inspectWindow.HasValue)
         {
             throw new ArgumentException("--inspect-point 只能与 --inspect-hwnd 一起使用。");
         }
@@ -101,15 +110,31 @@ internal sealed record PortalOptions(
         return new PortalOptions(
             radius,
             pollMilliseconds,
+            radiusWasSpecified,
+            pollWasSpecified,
             probeWindow,
             inspectWindow,
             inspectPoint,
             probeDurationMilliseconds,
             selfTest,
             listWindows,
-            compatibilityReport,
             showVersion,
-            showHelp);
+            showHelp,
+            traySmokeTestMilliseconds);
+    }
+
+    internal static nint ParseWindowHandle(string value)
+    {
+        var hexadecimal = value.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
+        var digits = hexadecimal ? value[2..] : value;
+        var style = hexadecimal ? NumberStyles.AllowHexSpecifier : NumberStyles.Integer;
+        if (!long.TryParse(digits, style, CultureInfo.InvariantCulture, out var parsed) || parsed <= 0)
+        {
+            throw new ArgumentException(
+                "窗口句柄必须是正数，例如 0x123456。");
+        }
+
+        return checked((nint)parsed);
     }
 
     private static string NextValue(string[] args, ref int index, string argument)
@@ -125,39 +150,26 @@ internal sealed record PortalOptions(
 
     private static int ParseInt(string value, string argument, int minimum, int maximum)
     {
-        if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result) ||
-            result < minimum ||
-            result > maximum)
+        if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ||
+            parsed < minimum ||
+            parsed > maximum)
         {
-            throw new ArgumentException($"{argument} 必须是 {minimum} 到 {maximum} 之间的整数。");
+            throw new ArgumentException(
+                $"{argument} 必须是 {minimum} 到 {maximum} 之间的整数。");
         }
 
-        return result;
+        return parsed;
     }
 
     private static int ParseCoordinate(string value, string argument)
     {
-        if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result) ||
-            result < -100_000 ||
-            result > 100_000)
+        if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ||
+            parsed is < -100000 or > 100000)
         {
-            throw new ArgumentException($"{argument} 坐标必须是 -100000 到 100000 之间的整数。");
+            throw new ArgumentException(
+                $"{argument} 坐标必须是 -100000 到 100000 之间的整数。");
         }
 
-        return result;
-    }
-
-    internal static nint ParseWindowHandle(string value)
-    {
-        var isHexadecimal = value.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
-        var digits = isHexadecimal ? value[2..] : value;
-        var style = isHexadecimal ? NumberStyles.AllowHexSpecifier : NumberStyles.Integer;
-
-        if (!long.TryParse(digits, style, CultureInfo.InvariantCulture, out var parsed) || parsed <= 0)
-        {
-            throw new ArgumentException("--probe-hwnd 必须是正数窗口句柄，例如 0x123456。");
-        }
-
-        return checked((nint)parsed);
+        return parsed;
     }
 }

@@ -195,7 +195,7 @@ if (-not [MultiLayerVisualProbeNative]::IsWindow($chatGpt)) {
 
 $targetPath = Join-Path $workspace 'tests\WindowPortal.TestTarget\bin\Release\net8.0-windows\WindowPortal.TestTarget.exe'
 $portalPath = if ([string]::IsNullOrWhiteSpace($PortalExecutable)) {
-    Join-Path $workspace 'src\WindowPortal\bin\Release\net8.0-windows\WindowPortal.exe'
+    Join-Path $workspace 'src\WindowPortal\bin\Release\net8.0-windows\PierceView.exe'
 }
 else {
     $PortalExecutable
