@@ -1,6 +1,6 @@
-# WindowPortal 0.7 技术预览
+# QL eye 0.7.1 技术预览
 
-这是“背景透明计划”的第一阶段原型：在 Windows 顶层窗口上动态设置一个带圆形缺口的窗口区域，使缺口内真实显示并可点击后方窗口。
+QL eye 是“背景透明计划”的产品名称；当前可执行模块仍名为 `WindowPortal.exe`。它在 Windows 顶层窗口上动态设置一个带圆形缺口的窗口区域，使缺口内真实显示并可点击后方窗口。
 
 > 当前版本是兼容性技术验证，不是可公开发布的成品。它不会注入或修改 ChatGPT 文件，但会在运行期间临时修改目标窗口的 Win32 region。
 
@@ -24,7 +24,7 @@ dotnet run --project .\src\WindowPortal\WindowPortal.csproj
 已经发布的视觉穿透版本位于：
 
 ```text
-artifacts\WindowPortal-v7\WindowPortal.exe
+artifacts\QL-eye-v0.7.1\WindowPortal.exe
 ```
 
 可以直接双击运行，不需要先执行构建命令；当前发布版本依赖本机已安装的 .NET 8 Runtime。
@@ -84,8 +84,8 @@ dotnet run --project .\src\WindowPortal\WindowPortal.csproj -- --probe-hwnd 0x12
 - 静态安全审计：无进程注入、进程内存访问、合成输入、联网和持久化能力。
 - 独立测试窗口：中心圆洞、移动圆洞和恢复核对全部通过。
 - 当前机器的 ChatGPT 主窗口（`Chrome_WidgetWin_1`）：圆洞生效，移动后旧圆心恢复，原始 region 类型 `2`，恢复后仍为 `2`。
-- 0.7 合成架构：每层一个持久 DWM thumbnail，最多三层；所有层通过一次 `DeferWindowPos` 同步移动，移除了 3px 条带和两个圆窗逐帧交换。
-- 最终发布物三层实测：三个颜色采样点全部命中，100 次运动采样的最大不同 portal bounds 数为 `1`；30 帧平均 `8.17 ms`，最慢 `40.85 ms`。
+- 0.7.1 合成架构：每层一个持久 DWM thumbnail，最多三层；依靠 portal HWND 的真实 Z-order 完成多层遮挡，场景切换使用同圆心预热交接。
+- 增强视觉探针逐帧检查圆形 region、同步位置、颜色键、layered alpha、portal 消失和整圆内容覆盖率；发布物实测数据见 0.7.1 报告。
 - 静止鼠标且来源窗口几何未变化时不会提交重复 DWM 更新。
 - 对抗性非激活点击验证：后台测试程序收到 Click 后故意执行 `BringToFront`、`Activate` 和 `SetForegroundWindow`；焦点守卫触发回滚，ChatGPT 前台 HWND 与可见 Z-order 均保持不变，退出后扩展窗口样式恢复。
 - 三层 Z-order 验证：初始顺序为 `ChatGPT → 小型 -1 → 大型 -2`；点击只被 -2 覆盖的圆洞区域后，真实 Click 成功，顺序变为 `ChatGPT → 原 -2 → 原 -1`，ChatGPT 前台 HWND 不变，两个后台窗口的临时扩展样式均在退出后恢复。
@@ -113,6 +113,7 @@ dotnet run --project .\src\WindowPortal\WindowPortal.csproj -- --probe-hwnd 0x12
 - [兼容性说明](docs/COMPATIBILITY.md)
 - [安全模型](docs/SECURITY.md)
 - [测试计划](docs/TEST_PLAN.md)
+- [0.7.1 实测报告](docs/TEST_RESULTS_0.7.1.md)
 - [0.7.0 实测报告](docs/TEST_RESULTS_0.7.0.md)
 - [发布检查清单](docs/RELEASE_CHECKLIST.md)
 - [版本变更记录](CHANGELOG.md)

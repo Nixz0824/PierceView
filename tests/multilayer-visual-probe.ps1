@@ -29,6 +29,15 @@ public static class MultiLayerVisualProbeNative
         public int Height { get { return Bottom - Top; } }
     }
 
+    public struct PortalWindowState
+    {
+        public Rect Bounds;
+        public int RegionType;
+        public long ExtendedStyle;
+        public uint LayeredFlags;
+        public byte LayeredAlpha;
+    }
+
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
@@ -44,6 +53,27 @@ public static class MultiLayerVisualProbeNative
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetWindowRect(IntPtr window, out Rect rect);
+
+    [DllImport("user32.dll")]
+    public static extern int GetWindowRgn(IntPtr window, IntPtr region);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    public static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetLayeredWindowAttributes(
+        IntPtr window,
+        out uint colorKey,
+        out byte alpha,
+        out uint flags);
+
+    [DllImport("gdi32.dll")]
+    public static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+
+    [DllImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DeleteObject(IntPtr value);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -104,9 +134,9 @@ public static class MultiLayerVisualProbeNative
         }
     }
 
-    public static Rect[] GetVisiblePortalRects(uint processId, int diameter)
+    public static PortalWindowState[] GetVisiblePortalStates(uint processId, int diameter)
     {
-        List<Rect> result = new List<Rect>();
+        List<PortalWindowState> result = new List<PortalWindowState>();
         EnumWindows(delegate(IntPtr window, IntPtr parameter)
         {
             uint windowProcessId;
@@ -118,7 +148,34 @@ public static class MultiLayerVisualProbeNative
                 rect.Width == diameter &&
                 rect.Height == diameter)
             {
-                result.Add(rect);
+                IntPtr region = CreateRectRgn(0, 0, 0, 0);
+                int regionType = region == IntPtr.Zero ? 0 : GetWindowRgn(window, region);
+                if (region != IntPtr.Zero)
+                {
+                    DeleteObject(region);
+                }
+
+                uint colorKey;
+                byte alpha;
+                uint layeredFlags;
+                if (!GetLayeredWindowAttributes(
+                        window,
+                        out colorKey,
+                        out alpha,
+                        out layeredFlags))
+                {
+                    alpha = 0;
+                    layeredFlags = 0;
+                }
+
+                result.Add(new PortalWindowState
+                {
+                    Bounds = rect,
+                    RegionType = regionType,
+                    ExtendedStyle = GetWindowLongPtr(window, -20).ToInt64(),
+                    LayeredFlags = layeredFlags,
+                    LayeredAlpha = alpha
+                });
             }
 
             return true;
@@ -171,6 +228,36 @@ function Test-ColorNear(
     return [Math]::Abs([int]$Actual.R - [int]$Expected.R) -le $Tolerance -and
         [Math]::Abs([int]$Actual.G - [int]$Expected.G) -le $Tolerance -and
         [Math]::Abs([int]$Actual.B - [int]$Expected.B) -le $Tolerance
+}
+
+function Get-KnownLayerCoverage(
+    [System.Drawing.Bitmap]$Bitmap,
+    [int]$Radius) {
+    $knownPixelCount = 0
+    $sampledPixelCount = 0
+    for ($y = 4; $y -lt $Bitmap.Height; $y += 8) {
+        for ($x = 4; $x -lt $Bitmap.Width; $x += 8) {
+            $offsetX = $x - $Radius
+            $offsetY = $y - $Radius
+            if (($offsetX * $offsetX) + ($offsetY * $offsetY) -gt ($Radius * $Radius)) {
+                continue
+            }
+
+            $sampledPixelCount++
+            $pixel = $Bitmap.GetPixel($x, $y)
+            if ((Test-ColorNear $pixel ([System.Drawing.Color]::FromArgb(217, 74, 74)) 65) -or
+                (Test-ColorNear $pixel ([System.Drawing.Color]::FromArgb(53, 107, 214)) 65) -or
+                (Test-ColorNear $pixel ([System.Drawing.Color]::FromArgb(53, 167, 101)) 65)) {
+                $knownPixelCount++
+            }
+        }
+    }
+
+    if ($sampledPixelCount -eq 0) {
+        return 0.0
+    }
+
+    return $knownPixelCount / [double]$sampledPixelCount
 }
 
 try {
@@ -235,9 +322,12 @@ try {
         throw 'ChatGPT could not be made foreground. Close or leave exclusive-fullscreen applications before GUI tests.'
     }
 
+    # Keep the portal alive beyond the complete sampling interval. Otherwise
+    # the normal HidePortal/exit transition can be sampled as a false black
+    # frame while the process is still completing its finally block.
     $portalProcess = Start-Process `
         -FilePath $portalPath `
-        -ArgumentList @('--probe-hwnd', "0x$($ChatGptWindow.ToString('X'))", '--probe-duration-ms', '500', '--radius', "$radius") `
+        -ArgumentList @('--probe-hwnd', "0x$($ChatGptWindow.ToString('X'))", '--probe-duration-ms', '2500', '--radius', "$radius") `
         -WindowStyle Hidden `
         -PassThru `
         -RedirectStandardOutput $portalOutput `
@@ -286,17 +376,116 @@ try {
     }
 
     $maxDistinctPortalPositions = 0
-    for ($sample = 0; $sample -lt 100 -and -not $portalProcess.HasExited; $sample++) {
-        $rects = [MultiLayerVisualProbeNative]::GetVisiblePortalRects(
-            [uint32]$portalProcess.Id,
-            $diameter)
-        $distinctPositions = @($rects | ForEach-Object {
-            "$($_.Left),$($_.Top),$($_.Right),$($_.Bottom)"
-        } | Sort-Object -Unique).Count
-        $maxDistinctPortalPositions = [Math]::Max(
-            $maxDistinctPortalPositions,
-            $distinctPositions)
-        Start-Sleep -Milliseconds 10
+    $missingPortalRegionFrameCount = 0
+    $layeredPortalWindowCount = 0
+    $colorKeyPortalWindowCount = 0
+    $invalidAlphaLayeredFrameCount = 0
+    $prewarmAlphaFrameCount = 0
+    $missingPortalWindowFrameCount = 0
+    $invalidCompositeFrameCount = 0
+    $confirmedValidNonLayerPointSampleCount = 0
+    $invalidCompositeSamples = [System.Collections.Generic.List[string]]::new()
+    $sampleBitmap = [System.Drawing.Bitmap]::new(1, 1)
+    $sampleGraphics = [System.Drawing.Graphics]::FromImage($sampleBitmap)
+    try {
+        for ($sample = 0; $sample -lt 100 -and -not $portalProcess.HasExited; $sample++) {
+            $states = [MultiLayerVisualProbeNative]::GetVisiblePortalStates(
+                [uint32]$portalProcess.Id,
+                $diameter)
+            $distinctPositions = @($states | ForEach-Object {
+                "$($_.Bounds.Left),$($_.Bounds.Top),$($_.Bounds.Right),$($_.Bounds.Bottom)"
+            } | Sort-Object -Unique).Count
+            $maxDistinctPortalPositions = [Math]::Max(
+                $maxDistinctPortalPositions,
+                $distinctPositions)
+            if ($states.Count -eq 0) {
+                $missingPortalWindowFrameCount++
+            }
+            else {
+                $sampleBounds = $states[0].Bounds
+                $sampleGraphics.CopyFromScreen(
+                    $sampleBounds.Left + $radius,
+                    $sampleBounds.Top + $radius + 80,
+                    0,
+                    0,
+                    [System.Drawing.Size]::new(1, 1))
+                $samplePixel = $sampleBitmap.GetPixel(0, 0)
+                $knownLayerColor =
+                    (Test-ColorNear $samplePixel ([System.Drawing.Color]::FromArgb(217, 74, 74)) 65) -or
+                    (Test-ColorNear $samplePixel ([System.Drawing.Color]::FromArgb(53, 107, 214)) 65) -or
+                    (Test-ColorNear $samplePixel ([System.Drawing.Color]::FromArgb(53, 167, 101)) 65)
+                if (-not $knownLayerColor) {
+                    $stateSummary = @($states | ForEach-Object {
+                        "r=$($_.RegionType),a=$($_.LayeredAlpha),f=0x$($_.LayeredFlags.ToString('X'))"
+                    }) -join '|'
+                    $invalidFrameBitmap = [System.Drawing.Bitmap]::new($diameter, $diameter)
+                    $invalidFrameGraphics = [System.Drawing.Graphics]::FromImage($invalidFrameBitmap)
+                    try {
+                        $invalidFrameGraphics.CopyFromScreen(
+                            $sampleBounds.Left,
+                            $sampleBounds.Top,
+                            0,
+                            0,
+                            [System.Drawing.Size]::new($diameter, $diameter))
+                        $confirmationPixel = $invalidFrameBitmap.GetPixel($radius, $radius + 80)
+                        $knownLayerCoverage = Get-KnownLayerCoverage $invalidFrameBitmap $radius
+                        if ($knownLayerCoverage -ge 0.2) {
+                            $confirmedValidNonLayerPointSampleCount++
+                        }
+                        else {
+                            $invalidCompositeFrameCount++
+                            $invalidCompositeSamples.Add(
+                                "$sample`:$($samplePixel.R),$($samplePixel.G),$($samplePixel.B)" +
+                                "->$($confirmationPixel.R),$($confirmationPixel.G),$($confirmationPixel.B)" +
+                                "@$($sampleBounds.Left),$($sampleBounds.Top);coverage=$($knownLayerCoverage.ToString('F3'))" +
+                                ";n=$($states.Count);$stateSummary")
+                            $invalidFrameBitmap.Save(
+                                (Join-Path $diagnosticDirectory "multilayer-invalid-$sample.png"),
+                                [System.Drawing.Imaging.ImageFormat]::Png)
+                        }
+                    }
+                    finally {
+                        $invalidFrameGraphics.Dispose()
+                        $invalidFrameBitmap.Dispose()
+                    }
+                }
+            }
+            if (@($states | Where-Object RegionType -eq 0).Count -gt 0) {
+                $missingPortalRegionFrameCount++
+            }
+            $layeredPortalWindowCount = [Math]::Max(
+                $layeredPortalWindowCount,
+                @($states | Where-Object { ($_.ExtendedStyle -band 0x00080000) -ne 0 }).Count)
+            $colorKeyPortalWindowCount = [Math]::Max(
+                $colorKeyPortalWindowCount,
+                @($states | Where-Object { ($_.LayeredFlags -band 0x00000001) -ne 0 }).Count)
+            $prewarmStates = @($states | Where-Object {
+                ($_.ExtendedStyle -band 0x00080000) -ne 0 -and
+                ($_.LayeredFlags -band 0x00000002) -ne 0 -and
+                $_.LayeredAlpha -eq 1
+            })
+            if ($prewarmStates.Count -gt 0) {
+                $prewarmAlphaFrameCount++
+            }
+            $fullAlphaStateCount = @($states | Where-Object {
+                ($_.ExtendedStyle -band 0x00080000) -ne 0 -and
+                ($_.LayeredFlags -band 0x00000002) -ne 0 -and
+                $_.LayeredAlpha -eq 255
+            }).Count
+            if (@($states | Where-Object {
+                ($_.ExtendedStyle -band 0x00080000) -ne 0 -and
+                (($_.LayeredFlags -band 0x00000002) -eq 0 -or
+                 ($_.LayeredAlpha -ne 1 -and $_.LayeredAlpha -ne 255))
+            }).Count -gt 0 -or
+                ($prewarmStates.Count -gt 0 -and $fullAlphaStateCount -eq 0)) {
+                $invalidAlphaLayeredFrameCount++
+            }
+            Start-Sleep -Milliseconds 10
+        }
+    }
+    finally {
+        $sampleGraphics.Dispose()
+        $sampleBitmap.Dispose()
     }
 
     $portalProcess.WaitForExit()
@@ -340,6 +529,15 @@ try {
     Write-Output "THREE_LAYERS_VISIBLE=$threeLayersVisible"
     Write-Output "MAX_DISTINCT_PORTAL_POSITIONS=$maxDistinctPortalPositions"
     Write-Output "LAYER_POSITIONS_SYNCHRONIZED=$layerPositionsSynchronized"
+    Write-Output "MISSING_PORTAL_REGION_FRAMES=$missingPortalRegionFrameCount"
+    Write-Output "LAYERED_PORTAL_WINDOW_COUNT=$layeredPortalWindowCount"
+    Write-Output "COLOR_KEY_PORTAL_WINDOW_COUNT=$colorKeyPortalWindowCount"
+    Write-Output "INVALID_ALPHA_LAYERED_FRAMES=$invalidAlphaLayeredFrameCount"
+    Write-Output "PREWARM_ALPHA_FRAMES=$prewarmAlphaFrameCount"
+    Write-Output "MISSING_PORTAL_WINDOW_FRAMES=$missingPortalWindowFrameCount"
+    Write-Output "INVALID_COMPOSITE_FRAMES=$invalidCompositeFrameCount"
+    Write-Output "INVALID_COMPOSITE_SAMPLES=$($invalidCompositeSamples -join ';')"
+    Write-Output "CONFIRMED_VALID_NON_LAYER_POINT_SAMPLES=$confirmedValidNonLayerPointSampleCount"
     Write-Output "AVERAGE_FRAME_MS=$averageFrameMilliseconds"
     Write-Output "SLOWEST_FRAME_MS=$slowestFrameMilliseconds"
     Write-Output "PERFORMANCE_WITHIN_BUDGET=$performanceWithinBudget"
@@ -349,6 +547,11 @@ try {
         $renderedLayerCount -ne 3 -or
         -not $threeLayersVisible -or
         -not $layerPositionsSynchronized -or
+        $missingPortalRegionFrameCount -ne 0 -or
+        $colorKeyPortalWindowCount -ne 0 -or
+        $invalidAlphaLayeredFrameCount -ne 0 -or
+        $missingPortalWindowFrameCount -ne 0 -or
+        $invalidCompositeFrameCount -ne 0 -or
         -not $performanceWithinBudget) {
         throw 'The multi-layer visual and motion probe failed.'
     }

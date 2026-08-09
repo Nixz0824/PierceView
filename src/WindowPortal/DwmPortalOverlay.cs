@@ -190,11 +190,14 @@ internal sealed class DwmPortalOverlay : IDisposable
     private sealed class PortalOverlayManager : Form
     {
         private const int MaxCompositedLayers = 3;
+        private const int SceneChangeConfirmationFrames = 3;
 
         private readonly ForegroundZOrderGuard _foregroundGuard = new();
         private readonly System.Windows.Forms.Timer _zOrderGuardTimer;
         private PortalScene? _scene;
         private NativeMethods.Point? _lastScreenCenter;
+        private nint[]? _pendingSceneWindows;
+        private int _pendingSceneFrameCount;
         private nint _protectedWindow;
         private bool _portalVisible;
 
@@ -247,25 +250,21 @@ internal sealed class DwmPortalOverlay : IDisposable
             }
 
             var descriptors = DiscoverLayers(protectedWindow, screenCenter, radius);
-            if (descriptors.Count == 0)
-            {
-                error = "圆洞范围内没有可参与合成的后台应用窗口。";
-                HidePortal();
-                return false;
-            }
-
-            if (!PortalScene.TryCreate(descriptors, radius, out var scene, out error) ||
-                !scene.TryPrepare(screenCenter, radius, out error) ||
-                !TrySwapScenes(null, scene, screenCenter, radius, out error))
+            PortalScene? scene = null;
+            if (descriptors.Count > 0 &&
+                (!PortalScene.TryCreate(descriptors, radius, out scene, out _) ||
+                 !scene.TryPrepare(screenCenter, radius, out _) ||
+                 !TrySwapScenes(null, scene, screenCenter, radius, out _) ||
+                 NativeMethods.DwmFlush() != 0))
             {
                 scene?.Dispose();
-                HidePortal();
-                return false;
+                scene = null;
             }
 
             _scene = scene;
             _portalVisible = true;
             _lastScreenCenter = screenCenter;
+            ResetPendingSceneChange();
             _zOrderGuardTimer.Start();
             _ = NativeMethods.DwmFlush();
             error = null;
@@ -279,17 +278,11 @@ internal sealed class DwmPortalOverlay : IDisposable
         {
             _foregroundGuard.UpdatePortalGeometry(screenCenter, radius);
             _foregroundGuard.EnsurePreserved();
-            _ = _foregroundGuard.TryTakePromotedWindow(
+            var promotionOccurred = _foregroundGuard.TryTakePromotedWindow(
                 out _,
                 out var promotionError);
-            if (promotionError is not null)
-            {
-                error = promotionError;
-                return false;
-            }
 
             if (!_portalVisible ||
-                _scene is null ||
                 !NativeMethods.IsWindow(_protectedWindow))
             {
                 error = "视觉穿透合成器已经不可用。";
@@ -297,45 +290,53 @@ internal sealed class DwmPortalOverlay : IDisposable
             }
 
             var descriptors = DiscoverLayers(_protectedWindow, screenCenter, radius);
-            if (descriptors.Count == 0)
+            if (_scene is null)
             {
-                error = "圆洞范围内没有可参与合成的后台应用窗口。";
-                return false;
-            }
-
-            if (!_scene.Matches(descriptors))
-            {
-                if (!PortalScene.TryCreate(descriptors, radius, out var nextScene, out error) ||
-                    !nextScene.TryPrepare(screenCenter, radius, out error) ||
-                    !TrySwapScenes(_scene, nextScene, screenCenter, radius, out error))
+                ResetPendingSceneChange();
+                if (descriptors.Count > 0)
                 {
-                    nextScene?.Dispose();
-                    return false;
+                    _ = TryInstallScene(descriptors, screenCenter, radius);
                 }
 
-                var previousScene = _scene;
-                _scene = nextScene;
                 _lastScreenCenter = screenCenter;
-                _ = NativeMethods.DwmFlush();
-                previousScene.Dispose();
                 error = null;
                 return true;
             }
 
-            if (_lastScreenCenter == screenCenter && !_scene.SourceGeometryChanged())
+            if (descriptors.Count == 0)
             {
+                ResetPendingSceneChange();
+                AdvanceOrDropCurrentScene(screenCenter, radius);
                 error = null;
                 return true;
             }
 
-            if (!_scene.TryPrepare(screenCenter, radius, out error) ||
-                !TryMoveScene(_scene, screenCenter, radius, out error))
+            if (_scene.Matches(descriptors))
             {
-                return false;
+                ResetPendingSceneChange();
+                AdvanceOrDropCurrentScene(screenCenter, radius);
+                error = null;
+                return true;
             }
+
+            var mustSwitchImmediately =
+                promotionOccurred ||
+                !_scene.SourcesAreValid();
+            if (mustSwitchImmediately || ConfirmPendingSceneChange(descriptors))
+            {
+                _ = TryInstallScene(descriptors, screenCenter, radius);
+                ResetPendingSceneChange();
+            }
+            else
+            {
+                AdvanceOrDropCurrentScene(screenCenter, radius);
+            }
+
+            // A foreground-guard warning must not freeze the visual/physical hole at
+            // different cursor samples. The guard retries independently on its timer.
+            _ = promotionError;
 
             _lastScreenCenter = screenCenter;
-            _ = NativeMethods.DwmFlush();
             error = null;
             return true;
         }
@@ -353,6 +354,7 @@ internal sealed class DwmPortalOverlay : IDisposable
             _scene = null;
             _foregroundGuard.Restore();
             _lastScreenCenter = null;
+            ResetPendingSceneChange();
             _protectedWindow = nint.Zero;
         }
 
@@ -365,6 +367,110 @@ internal sealed class DwmPortalOverlay : IDisposable
             }
 
             base.Dispose(disposing);
+        }
+
+        private void AdvanceOrDropCurrentScene(
+            NativeMethods.Point screenCenter,
+            int radius)
+        {
+            if (_scene is null)
+            {
+                _lastScreenCenter = screenCenter;
+                return;
+            }
+
+            if (_lastScreenCenter == screenCenter && !_scene.SourceGeometryChanged())
+            {
+                return;
+            }
+
+            var prepared = _scene.TryPrepare(screenCenter, radius, out _);
+            if (TryMoveScene(_scene, screenCenter, radius, out _))
+            {
+                _lastScreenCenter = screenCenter;
+                if (prepared)
+                {
+                    _ = NativeMethods.DwmFlush();
+                }
+
+                return;
+            }
+
+            var failedScene = _scene;
+            _ = TrySwapScenes(failedScene, null, default, 0, out _);
+            _scene = null;
+            failedScene.Dispose();
+            _lastScreenCenter = screenCenter;
+            _ = NativeMethods.DwmFlush();
+        }
+
+        private bool TryInstallScene(
+            IReadOnlyList<PortalLayerDescriptor> descriptors,
+            NativeMethods.Point screenCenter,
+            int radius)
+        {
+            // Keep the outgoing and incoming forms on the exact same sample.
+            // Move only the outgoing HWNDs here: updating their live thumbnails
+            // during retirement can expose DWM's black intermediate surface.
+            // Stale content is safe for this sub-frame hand-off and remains the
+            // last-known-good visual until the replacement is warm.
+            if (_scene is not null)
+            {
+                if (TryMoveScene(_scene, screenCenter, radius, out _))
+                {
+                    _lastScreenCenter = screenCenter;
+                }
+            }
+
+            var previousScene = _scene;
+            if (!PortalScene.TryCreate(descriptors, radius, out var nextScene, out _) ||
+                !nextScene.TryPrepare(screenCenter, radius, out _) ||
+                (previousScene is not null && !nextScene.TrySetGlobalAlpha(1, out _)) ||
+                // Present and warm the replacement while the last-known-good
+                // scene is still visible. A hidden destination window does not
+                // reliably receive a ready DWM thumbnail before its first frame.
+                !TrySwapScenes(null, nextScene, screenCenter, radius, out _) ||
+                NativeMethods.DwmFlush() != 0 ||
+                (previousScene is not null &&
+                 (!nextScene.TrySetGlobalAlpha(byte.MaxValue, out _) ||
+                  NativeMethods.DwmFlush() != 0)))
+            {
+                nextScene?.Dispose();
+                AdvanceOrDropCurrentScene(screenCenter, radius);
+                return false;
+            }
+
+            _scene = nextScene;
+            _lastScreenCenter = screenCenter;
+
+            // The new forms fully cover the same portal bounds. Retiring the old
+            // forms only after the flush removes the one-frame empty hand-off
+            // that appeared as a black flash or a transient rectangle.
+            previousScene?.Dispose();
+            _ = NativeMethods.DwmFlush();
+            return true;
+        }
+
+        private bool ConfirmPendingSceneChange(
+            IReadOnlyList<PortalLayerDescriptor> descriptors)
+        {
+            var windows = descriptors.Select(descriptor => descriptor.Window).ToArray();
+            if (_pendingSceneWindows is null ||
+                !_pendingSceneWindows.SequenceEqual(windows))
+            {
+                _pendingSceneWindows = windows;
+                _pendingSceneFrameCount = 1;
+                return false;
+            }
+
+            _pendingSceneFrameCount++;
+            return _pendingSceneFrameCount >= SceneChangeConfirmationFrames;
+        }
+
+        private void ResetPendingSceneChange()
+        {
+            _pendingSceneWindows = null;
+            _pendingSceneFrameCount = 0;
         }
 
         private static List<PortalLayerDescriptor> DiscoverLayers(
@@ -415,7 +521,6 @@ internal sealed class DwmPortalOverlay : IDisposable
                 return false;
             }
 
-            var diameter = checked((radius * 2) + 1);
             foreach (var form in forms)
             {
                 position = NativeMethods.DeferWindowPos(
@@ -424,9 +529,10 @@ internal sealed class DwmPortalOverlay : IDisposable
                     nint.Zero,
                     center.X - radius,
                     center.Y - radius,
-                    diameter,
-                    diameter,
+                    0,
+                    0,
                     NativeMethods.SwpNoZOrder |
+                    NativeMethods.SwpNoSize |
                     NativeMethods.SwpNoActivate |
                     NativeMethods.SwpNoOwnerZOrder);
                 if (position == nint.Zero)
@@ -648,6 +754,25 @@ internal sealed class DwmPortalOverlay : IDisposable
             return false;
         }
 
+        internal bool SourcesAreValid() =>
+            _layers.All(layer =>
+                NativeMethods.IsWindow(layer.Descriptor.Window) &&
+                NativeMethods.IsWindowVisible(layer.Descriptor.Window));
+
+        internal bool TrySetGlobalAlpha(byte alpha, out string? error)
+        {
+            foreach (var form in Forms)
+            {
+                if (!form.TrySetGlobalAlpha(alpha, out error))
+                {
+                    return false;
+                }
+            }
+
+            error = null;
+            return true;
+        }
+
         internal bool TryPrepare(
             NativeMethods.Point screenCenter,
             int radius,
@@ -673,9 +798,19 @@ internal sealed class DwmPortalOverlay : IDisposable
                     continue;
                 }
 
+                var unrenderableShallowerRects = Enumerable
+                    .Range(0, index)
+                    .Where(shallowIndex => _layers[shallowIndex].Form is null)
+                    .Select(shallowIndex => sourceRects[shallowIndex])
+                    .ToArray();
                 if (!form.TryPrepare(
                         sourceRects[index],
-                        sourceRects.Take(index).ToArray(),
+                        // The portal forms already have the same shallow-to-deep
+                        // Z-order as the source windows. Let normal window
+                        // stacking occlude renderable layers. Only reserve the
+                        // rectangles of unsupported shallower sources so deeper
+                        // content cannot impersonate a protected/uncapturable app.
+                        unrenderableShallowerRects,
                         screenCenter,
                         radius,
                         out error))
@@ -705,16 +840,19 @@ internal sealed class DwmPortalOverlay : IDisposable
     {
         private const int WsExTransparent = 0x00000020;
         private const int WsExToolWindow = 0x00000080;
+        private const int WsExLayered = 0x00080000;
         private const int WsExNoActivate = 0x08000000;
         private const int WmNcHitTest = 0x0084;
         private const int WmMouseActivate = 0x0021;
         private static readonly nint HtTransparent = new(-1);
         private static readonly nint MaNoActivate = new(3);
-        private static readonly Color PortalTransparencyColor = Color.FromArgb(255, 1, 0, 255);
 
         private readonly int _diameter;
         private nint _thumbnail;
+        private nint _regionProbe;
         private PortalRegionSignature? _lastRegionSignature;
+        private int _lastRegionType = NativeMethods.ErrorRegion;
+        private NativeMethods.Rect _lastRegionBounds;
 
         internal PortalLayerForm(int radius)
         {
@@ -723,8 +861,9 @@ internal sealed class DwmPortalOverlay : IDisposable
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
             AutoScaleMode = AutoScaleMode.None;
-            BackColor = PortalTransparencyColor;
-            TransparencyKey = PortalTransparencyColor;
+            // SetWindowRgn provides the shape. Alpha-only WS_EX_LAYERED is retained
+            // for reliable cross-process click-through, but no color key is used.
+            BackColor = Color.Black;
             TopMost = true;
             Bounds = new Rectangle(0, 0, _diameter, _diameter);
         }
@@ -736,9 +875,23 @@ internal sealed class DwmPortalOverlay : IDisposable
             get
             {
                 var parameters = base.CreateParams;
-                parameters.ExStyle |= WsExTransparent | WsExToolWindow | WsExNoActivate;
+                parameters.ExStyle |=
+                    WsExTransparent |
+                    WsExToolWindow |
+                    WsExLayered |
+                    WsExNoActivate;
                 return parameters;
             }
+        }
+
+        protected override void OnHandleCreated(EventArgs eventArgs)
+        {
+            base.OnHandleCreated(eventArgs);
+            _ = NativeMethods.SetLayeredWindowAttributes(
+                Handle,
+                0,
+                byte.MaxValue,
+                NativeMethods.LwaAlpha);
         }
 
         internal bool TryRegisterSource(nint sourceWindow, out string? error)
@@ -748,6 +901,22 @@ internal sealed class DwmPortalOverlay : IDisposable
             {
                 error = $"DwmRegisterThumbnail 失败：0x{result:X8}。";
                 _thumbnail = nint.Zero;
+                return false;
+            }
+
+            error = null;
+            return true;
+        }
+
+        internal bool TrySetGlobalAlpha(byte alpha, out string? error)
+        {
+            if (!NativeMethods.SetLayeredWindowAttributes(
+                    Handle,
+                    0,
+                    alpha,
+                    NativeMethods.LwaAlpha))
+            {
+                error = LastWin32Error("无法设置多层透视场景的预热透明度");
                 return false;
             }
 
@@ -818,9 +987,16 @@ internal sealed class DwmPortalOverlay : IDisposable
                     rect.Bottom - portalBounds.Top))
                 .ToArray();
             var signature = new PortalRegionSignature(destination, occluderClips);
-            if (_lastRegionSignature is null || !_lastRegionSignature.Value.Equals(signature))
+            if (_lastRegionSignature is null ||
+                !_lastRegionSignature.Value.Equals(signature) ||
+                !HasExpectedRegion())
             {
-                if (!TryApplyRegion(destination, occluderClips, out error))
+                if (!TryApplyRegion(
+                        destination,
+                        occluderClips,
+                        out _lastRegionType,
+                        out _lastRegionBounds,
+                        out error))
                 {
                     return false;
                 }
@@ -858,14 +1034,24 @@ internal sealed class DwmPortalOverlay : IDisposable
                 _thumbnail = nint.Zero;
             }
 
+            if (_regionProbe != nint.Zero)
+            {
+                _ = NativeMethods.DeleteObject(_regionProbe);
+                _regionProbe = nint.Zero;
+            }
+
             base.Dispose(disposing);
         }
 
         private bool TryApplyRegion(
             NativeMethods.Rect sourceClip,
             IReadOnlyList<NativeMethods.Rect> occluderClips,
+            out int regionType,
+            out NativeMethods.Rect regionBounds,
             out string? error)
         {
+            regionType = NativeMethods.ErrorRegion;
+            regionBounds = default;
             var region = NativeMethods.CreateEllipticRgn(0, 0, _diameter, _diameter);
             var sourceRegion = NativeMethods.CreateRectRgn(
                 sourceClip.Left,
@@ -921,7 +1107,15 @@ internal sealed class DwmPortalOverlay : IDisposable
                 }
             }
 
-            if (NativeMethods.SetWindowRgn(Handle, region, redraw: false) == 0)
+            regionType = NativeMethods.GetRgnBox(region, out regionBounds);
+            if (regionType == NativeMethods.ErrorRegion)
+            {
+                _ = NativeMethods.DeleteObject(region);
+                error = LastWin32Error("无法读取多层透视圆的最终裁剪范围");
+                return false;
+            }
+
+            if (NativeMethods.SetWindowRgn(Handle, region, redraw: true) == 0)
             {
                 _ = NativeMethods.DeleteObject(region);
                 error = LastWin32Error("无法提交 DWM 图层的圆形区域");
@@ -931,6 +1125,32 @@ internal sealed class DwmPortalOverlay : IDisposable
             // SetWindowRgn succeeded and now owns the region handle.
             error = null;
             return true;
+        }
+
+        private bool HasExpectedRegion()
+        {
+            if (_lastRegionType == NativeMethods.ErrorRegion)
+            {
+                return false;
+            }
+
+            if (_regionProbe == nint.Zero)
+            {
+                _regionProbe = NativeMethods.CreateRectRgn(0, 0, 0, 0);
+                if (_regionProbe == nint.Zero)
+                {
+                    return false;
+                }
+            }
+
+            var currentType = NativeMethods.GetWindowRgn(Handle, _regionProbe);
+            if (currentType != _lastRegionType)
+            {
+                return false;
+            }
+
+            var boundsType = NativeMethods.GetRgnBox(_regionProbe, out var currentBounds);
+            return boundsType == _lastRegionType && currentBounds == _lastRegionBounds;
         }
 
         private static NativeMethods.Rect Intersect(

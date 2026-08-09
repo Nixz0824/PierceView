@@ -35,6 +35,7 @@ internal static class NativeMethods
     internal const uint DwmTnpOpacity = 0x00000004;
     internal const uint DwmTnpVisible = 0x00000008;
     internal const uint DwmTnpSourceClientAreaOnly = 0x00000010;
+    internal const uint LwaAlpha = 0x00000002;
     internal const uint SwpNoSize = 0x0001;
     internal const uint SwpNoMove = 0x0002;
     internal const uint SwpNoZOrder = 0x0004;
@@ -136,6 +137,14 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
     internal static extern nint SetWindowLongPtr(nint window, int index, nint newValue);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetLayeredWindowAttributes(
+        nint window,
+        uint colorKey,
+        byte alpha,
+        uint flags);
 
     [DllImport("user32.dll")]
     internal static extern nint GetDesktopWindow();
@@ -266,6 +275,9 @@ internal static class NativeMethods
 
     [DllImport("gdi32.dll", SetLastError = true)]
     internal static extern int CombineRgn(nint destination, nint source1, nint source2, int mode);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    internal static extern int GetRgnBox(nint region, out Rect bounds);
 
     [DllImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

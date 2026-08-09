@@ -14,7 +14,7 @@
 1. 根目录 `VERSION`。
 2. `WindowPortal.csproj` 的 Version、AssemblyVersion、FileVersion 和 InformationalVersion。
 3. `CHANGELOG.md`。
-4. 发布目录 `artifacts/WindowPortal-vN` 与 Git tag `vMAJOR.MINOR.PATCH`。
+4. 发布目录 `artifacts/QL-eye-vMAJOR.MINOR.PATCH` 与 Git tag `vMAJOR.MINOR.PATCH`。
 
 `WindowPortal.exe --version` 必须与 `VERSION` 完全一致，CI 会自动验证。
 
