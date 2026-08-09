@@ -1,145 +1,127 @@
+using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace WindowPortal;
 
 internal sealed class NonActivatingWindowGuard : IDisposable
 {
-    private const long WsExNoActivate = 0x08000000;
-    private readonly Dictionary<nint, GuardedWindowState> _windows = [];
+	private readonly record struct GuardedWindowState(uint ProcessId, nint OriginalExtendedStyle, bool ChangedStyle);
 
-    internal int Count => _windows.Count;
+	private const long WsExNoActivate = 134217728L;
 
-    internal bool Contains(nint window) => _windows.ContainsKey(window);
+	private readonly Dictionary<nint, GuardedWindowState> _windows = new Dictionary<nint, GuardedWindowState>();
 
-    internal bool TryEnable(nint window, out string? error)
-    {
-        Restore();
-        return TryAdd(window, out error);
-    }
+	internal int Count => _windows.Count;
 
-    internal bool TryAdd(nint window, out string? error)
-    {
-        if (window == nint.Zero || !NativeMethods.IsWindow(window))
-        {
-            error = "后台窗口已经不可用，无法启用非激活交互。";
-            return false;
-        }
+	internal bool Contains(nint window)
+	{
+		return _windows.ContainsKey(window);
+	}
 
-        if (_windows.ContainsKey(window))
-        {
-            error = null;
-            return true;
-        }
+	internal bool TryEnable(nint window, out string? error)
+	{
+		Restore();
+		return TryAdd(window, out error);
+	}
 
-        NativeMethods.GetWindowThreadProcessId(window, out var processId);
-        if (processId == 0)
-        {
-            error = "无法识别后台窗口的进程。";
-            return false;
-        }
+	internal bool TryAdd(nint window, out string? error)
+	{
+		if (window == IntPtr.Zero || !NativeMethods.IsWindow(window))
+		{
+			error = "后台窗口已经不可用，无法启用非激活交互。";
+			return false;
+		}
+		if (_windows.ContainsKey(window))
+		{
+			error = null;
+			return true;
+		}
+		NativeMethods.GetWindowThreadProcessId(window, out var processId);
+		if (processId == 0)
+		{
+			error = "无法识别后台窗口的进程。";
+			return false;
+		}
+		Marshal.SetLastPInvokeError(0);
+		nint windowLongPtr = NativeMethods.GetWindowLongPtr(window, -20);
+		int lastPInvokeError = Marshal.GetLastPInvokeError();
+		if (windowLongPtr == IntPtr.Zero && lastPInvokeError != 0)
+		{
+			error = Win32Error("无法读取后台窗口的扩展样式", lastPInvokeError);
+			return false;
+		}
+		bool flag = (((IntPtr)windowLongPtr).ToInt64() & 0x8000000) == 0;
+		if (flag)
+		{
+			nint newValue = new IntPtr(((IntPtr)windowLongPtr).ToInt64() | 0x8000000);
+			Marshal.SetLastPInvokeError(0);
+			nint num = NativeMethods.SetWindowLongPtr(window, -20, newValue);
+			int lastPInvokeError2 = Marshal.GetLastPInvokeError();
+			if (num == IntPtr.Zero && lastPInvokeError2 != 0)
+			{
+				error = Win32Error("无法阻止后台窗口在点击时置前", lastPInvokeError2);
+				return false;
+			}
+			if (!RefreshWindowStyle(window))
+			{
+				int lastPInvokeError3 = Marshal.GetLastPInvokeError();
+				NativeMethods.SetWindowLongPtr(window, -20, windowLongPtr);
+				RefreshWindowStyle(window);
+				error = Win32Error("无法刷新后台窗口的非激活样式", lastPInvokeError3);
+				return false;
+			}
+		}
+		_windows.Add(window, new GuardedWindowState(processId, windowLongPtr, flag));
+		error = null;
+		return true;
+	}
 
-        Marshal.SetLastPInvokeError(0);
-        var originalStyle = NativeMethods.GetWindowLongPtr(window, NativeMethods.GwlExStyle);
-        var readStyleError = Marshal.GetLastPInvokeError();
-        if (originalStyle == nint.Zero && readStyleError != 0)
-        {
-            error = Win32Error("无法读取后台窗口的扩展样式", readStyleError);
-            return false;
-        }
+	internal void Restore()
+	{
+		KeyValuePair<nint, GuardedWindowState>[] array = _windows.ToArray();
+		_windows.Clear();
+		foreach (var keyValuePair in array)
+		{
+			var window = keyValuePair.Key;
+			var guardedWindowState2 = keyValuePair.Value;
+			if (guardedWindowState2.ChangedStyle && IsSameWindow(window, guardedWindowState2.ProcessId))
+			{
+				NativeMethods.SetWindowLongPtr(window, -20, guardedWindowState2.OriginalExtendedStyle);
+				RefreshWindowStyle(window);
+			}
+		}
+	}
 
-        var changedStyle = (originalStyle.ToInt64() & WsExNoActivate) == 0;
-        if (changedStyle)
-        {
-            var guardedStyle = new nint(originalStyle.ToInt64() | WsExNoActivate);
-            Marshal.SetLastPInvokeError(0);
-            var previousStyle = NativeMethods.SetWindowLongPtr(
-                window,
-                NativeMethods.GwlExStyle,
-                guardedStyle);
-            var setStyleError = Marshal.GetLastPInvokeError();
-            if (previousStyle == nint.Zero && setStyleError != 0)
-            {
-                error = Win32Error("无法阻止后台窗口在点击时置前", setStyleError);
-                return false;
-            }
+	public void Dispose()
+	{
+		Restore();
+		GC.SuppressFinalize(this);
+	}
 
-            if (!RefreshWindowStyle(window))
-            {
-                var refreshError = Marshal.GetLastPInvokeError();
-                _ = NativeMethods.SetWindowLongPtr(
-                    window,
-                    NativeMethods.GwlExStyle,
-                    originalStyle);
-                _ = RefreshWindowStyle(window);
-                error = Win32Error("无法刷新后台窗口的非激活样式", refreshError);
-                return false;
-            }
-        }
+	private static bool IsSameWindow(nint window, uint expectedProcessId)
+	{
+		if (!NativeMethods.IsWindow(window))
+		{
+			return false;
+		}
+		NativeMethods.GetWindowThreadProcessId(window, out var processId);
+		return processId == expectedProcessId;
+	}
 
-        _windows.Add(
-            window,
-            new GuardedWindowState(processId, originalStyle, changedStyle));
-        error = null;
-        return true;
-    }
+	private static bool RefreshWindowStyle(nint window)
+	{
+		return NativeMethods.SetWindowPos(window, IntPtr.Zero, 0, 0, 0, 0, 55u);
+	}
 
-    internal void Restore()
-    {
-        var states = _windows.ToArray();
-        _windows.Clear();
-
-        foreach (var (window, state) in states)
-        {
-            if (!state.ChangedStyle || !IsSameWindow(window, state.ProcessId))
-            {
-                continue;
-            }
-
-            _ = NativeMethods.SetWindowLongPtr(
-                window,
-                NativeMethods.GwlExStyle,
-                state.OriginalExtendedStyle);
-            _ = RefreshWindowStyle(window);
-        }
-    }
-
-    public void Dispose()
-    {
-        Restore();
-        GC.SuppressFinalize(this);
-    }
-
-    private static bool IsSameWindow(nint window, uint expectedProcessId)
-    {
-        if (!NativeMethods.IsWindow(window))
-        {
-            return false;
-        }
-
-        NativeMethods.GetWindowThreadProcessId(window, out var currentProcessId);
-        return currentProcessId == expectedProcessId;
-    }
-
-    private static bool RefreshWindowStyle(nint window) =>
-        NativeMethods.SetWindowPos(
-            window,
-            nint.Zero,
-            0,
-            0,
-            0,
-            0,
-            NativeMethods.SwpNoMove |
-            NativeMethods.SwpNoSize |
-            NativeMethods.SwpNoZOrder |
-            NativeMethods.SwpNoActivate |
-            NativeMethods.SwpFrameChanged);
-
-    private static string Win32Error(string message, int error) =>
-        error == 0 ? message : $"{message}：{new Win32Exception(error).Message}（{error}）";
-
-    private readonly record struct GuardedWindowState(
-        uint ProcessId,
-        nint OriginalExtendedStyle,
-        bool ChangedStyle);
+	private static string Win32Error(string message, int error)
+	{
+		if (error != 0)
+		{
+			return $"{message}：{new Win32Exception(error).Message}（{error}）";
+		}
+		return message;
+	}
 }

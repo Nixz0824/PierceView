@@ -19,6 +19,7 @@ $forbiddenCapabilities = [ordered]@{
     'remote-allocation' = '\bVirtualAllocEx\b'
     'dll-injection' = '\bLoadLibrary(?:A|W)?\b'
     'keyboard-hook' = '\bWH_KEYBOARD(?:_LL)?\b'
+    'low-level-mouse-hook' = '\bWH_MOUSE_LL\b|\bSetWindowsHookEx(?:W|A)?\b'
     'synthetic-input' = '\bSendInput\b|\bmouse_event\b|\bkeybd_event\b'
     'network-client' = '\bHttpClient\b|\bWebRequest\b|\bSocket\b|\bTcpClient\b'
     'registry-persistence' = '\bRegistryKey\b|CurrentVersion\\Run'
@@ -44,8 +45,7 @@ if ($manifestText -notmatch 'uiAccess="false"') {
 $requiredSafetyMechanisms = [ordered]@{
     'normal-restoration' = 'WindowRegionController'
     'non-activating-style-restoration' = 'NonActivatingWindowGuard'
-    'anti-cheat-exclusion' = 'CompatibilityPolicy'
-    'low-level-mouse-only' = 'WhMouseLowLevel'
+    'foreground-restoration' = 'ForegroundZOrderGuard'
 }
 foreach ($entry in $requiredSafetyMechanisms.GetEnumerator()) {
     if ($sourceText -notmatch [regex]::Escape($entry.Value)) {
@@ -53,15 +53,16 @@ foreach ($entry in $requiredSafetyMechanisms.GetEnumerator()) {
     }
 }
 
-Write-Output 'STATIC_SECURITY_AUDIT=WindowPortal'
+Write-Output 'STATIC_SECURITY_AUDIT=PierceView'
 Write-Output 'ELEVATION=asInvoker'
 Write-Output 'UI_ACCESS=false'
 Write-Output 'PROCESS_INJECTION=false'
 Write-Output 'PROCESS_MEMORY_ACCESS=false'
 Write-Output 'SYNTHETIC_INPUT=false'
 Write-Output 'NETWORK_ACCESS=false'
-Write-Output 'PERSISTENCE=false'
-Write-Output 'GLOBAL_HOOK=WH_MOUSE_LL only while F8 portal is active'
+Write-Output 'AUTOSTART_PERSISTENCE=false'
+Write-Output 'LOCAL_SETTINGS=%LOCALAPPDATA%\PierceView\settings.json'
+Write-Output 'GLOBAL_HOOK=false'
 Write-Output "FAILURE_COUNT=$($failures.Count)"
 
 if ($failures.Count -gt 0) {

@@ -1,22 +1,27 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>WindowPortal</AssemblyName>
+    <AssemblyName>PierceView</AssemblyName>
     <RootNamespace>WindowPortal</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.7.1</Version>
-    <AssemblyVersion>0.7.1.0</AssemblyVersion>
-    <FileVersion>0.7.1.0</FileVersion>
-    <InformationalVersion>0.7.1</InformationalVersion>
+    <Version>1.0.0-rc.1</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <InformationalVersion>1.0.0-rc.1</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-    <Product>QL eye</Product>
-    <Company>QL eye Project</Company>
-    <Description>受限层级提升与多层 DWM 圆形窗口合成工具</Description>
+    <Product>寸镜 / PierceView</Product>
+    <Company>PierceView Project</Company>
+    <Description>单层圆形窗口透视托盘工具</Description>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\assets\brand\ql-eye-logo-concept-v5-content-continuity-bw.png"
+                      LogicalName="PierceView.Logo.png" />
+  </ItemGroup>
 </Project>

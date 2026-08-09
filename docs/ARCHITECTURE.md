@@ -1,61 +1,49 @@
-# WindowPortal 0.7 架构说明
+# 寸镜 / PierceView 1.0 架构说明
 
-## 核心数据流
-
-```text
-F8 + 鼠标坐标
-      |
-      +--> WindowRegionController：从宿主 HWND region 中减去圆
-      |
-      +--> PortalOverlayManager：枚举宿主之后最多三层顶层窗口
-                 |
-                 +--> CompatibilityPolicy：允许 / 无视觉表面 / 受保护 / 忽略
-                 |
-                 +--> PortalScene：每个可渲染层注册一个 DWM thumbnail
-                            |
-                            +--> 椭圆 ∩ 当前层矩形 - 所有浅层矩形
-                            +--> 所有图层一次 DeferWindowPos 同步移动
-      |
-鼠标按下 --> WH_MOUSE_LL --> ForegroundZOrderGuard
-                            +--> WS_EX_NOACTIVATE
-                            +--> SetWindowPos(target, host, SWP_NOACTIVATE)
-                            +--> WinEvent + 10ms guard timer 恢复宿主前台
-```
-
-## 从 v6 到 v7 的关键变化
-
-v6 为获得圆边缘而把每个画面拆成 3 px 水平条带。半径 180 时，单个缓冲约有 121 个 DWM 缩略图，并用前后两个顶层窗逐帧隐藏/显示。这会造成窗口位置和 DWM 提交不同步，出现双圆、频闪和偶发黑帧。
-
-v7 使用一个持久场景：
-
-- 每层只注册一个 DWM thumbnail。
-- 使用目标窗口 region 形成圆形和层级裁剪。
-- 三个层窗在同一次 `BeginDeferWindowPos` / `EndDeferWindowPos` 中移动。
-- 鼠标静止且来源窗口几何未变化时完全跳过更新。
-- 只有来源 HWND 列表改变时才重建隐藏场景并原子替换。
-
-## 多层可见区域算法
-
-对第 `i` 层，窗口 region 近似为：
+## 总体结构
 
 ```text
-circle
-∩ bounds(layer[i])
-- bounds(layer[0])
-- ...
-- bounds(layer[i-1])
+托盘 UI 线程
+  ├─ NotifyIcon：启动/暂停、设置、帮助、退出
+  ├─ SettingsForm：半径、语言
+  └─ PortalRuntime：启动/停止工作线程
+
+单层运行线程
+  ├─ GetAsyncKeyState(F8) + 鼠标坐标
+  ├─ WindowRegionController：在宿主 region 中减去圆
+  └─ DwmPortalOverlay：复制固定的 -1 来源
+       ├─ 两个预览窗口交替提交
+       ├─ NonActivatingWindowGuard：临时 WS_EX_NOACTIVATE
+       └─ ForegroundZOrderGuard：WinEvent 恢复宿主前台
 ```
 
-因此 -1、-2、-3 的图像不会互相覆盖错误区域。当前使用顶层窗口矩形近似遮挡；复杂的 per-pixel layered window、圆角和透明子区域是 0.8 的精细化方向。
+## 托盘生命周期
 
-## 线程模型
+`Program` 只在普通启动时创建单实例互斥量和 `PierceViewApplicationContext`。应用上下文拥有托盘图标、菜单、设置窗口和运行时；退出时先停止运行时、恢复窗口，再移除托盘图标。命令行自检、窗口清单和探针模式不启动托盘。
 
-- 主线程：F8/退出键轮询、宿主 region 更新和诊断模式。
-- STA 合成线程：WinForms 消息循环、DWM 目标窗、鼠标钩子与 WinEvent 回调。
-- 不进入目标进程，不创建远程线程，不读取目标进程内存。
+## 单层透视数据流
 
-## 失败恢复
+1. F8 首次按下时，`WindowRegionController` 锁定鼠标下的宿主顶层 HWND，并保存其原始 region。
+2. 在宿主 region 中减去圆后，`WindowFromPoint` 得到该位置当前暴露的 -1 顶层窗口。
+3. 本次 F8 会话固定使用这个来源，不枚举或切换 -2/-3/-4。
+4. `DwmPortalOverlay` 用 DWM thumbnail 把来源窗口对应区域画到圆形预览窗。
+5. V6 为近似圆边缘，按 3 px 水平条带注册缩略图，并在前后两个预览窗之间原子换帧。
+6. 松开 F8 时先隐藏预览，再恢复宿主 region 和来源扩展样式。
 
-- 正常松开 F8：隐藏/销毁 DWM 场景，卸载 hooks，恢复所有后台扩展样式，最后恢复宿主 region。
-- Ctrl+C、正常进程退出、未处理异常：执行同一恢复路径。
-- 强制终止（Task Manager End task / `taskkill /F`）无法保证托管 finally 或 ProcessExit 执行；0.8 需要独立 watchdog 恢复默认 region 与样式。
+## 交互与前台保护
+
+寸镜不转发或合成鼠标事件。圆形缺口让 Windows 自己把真实鼠标事件送给下面的窗口。透视期间，来源窗口临时增加 `WS_EX_NOACTIVATE`；若来源仍主动争夺前台，WinEvent 守卫把它放回宿主之后并恢复宿主前台。
+
+1.0 没有 `WH_MOUSE_LL`，没有深层命中识别，也没有后台窗口提升算法。
+
+## 线程与恢复
+
+- UI 线程：托盘和设置。
+- 运行线程：F8、物理 region、单层会话状态。
+- DWM STA 线程：预览窗口和 DWM thumbnail。
+
+正常松键、暂停、设置重启运行时、托盘退出和普通进程退出都会执行同一恢复路径。强制结束进程无法保证托管清理，因此不要在 F8 按住时用任务管理器强制结束。
+
+## 已知技术边界
+
+条带圆是 V6 稳定版的有意保留方案，边缘仍有轻微阶梯。两个预览窗降低撕裂，但无法从原理上保证所有 GPU/驱动组合都没有偶发黑帧。矩形 GPU 合成与 Alpha 羽化属于 2.0/2.1，最多四层与深层重排属于 2.5。

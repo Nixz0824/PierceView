@@ -6,12 +6,13 @@ namespace WindowPortal;
 
 internal static class Program
 {
-    private static volatile bool _exitRequested;
+    private const string SingleInstanceName =
+        "Local\\PierceView.SingleInstance.2D9EE2AF-9F96-4C79-9F48-12E087B8A1A4";
 
     [STAThread]
     private static int Main(string[] args)
     {
-        Console.OutputEncoding = Encoding.UTF8;
+        ConfigureRedirectedConsole();
         NativeMethods.TryEnablePerMonitorDpiAwareness();
 
         PortalOptions options;
@@ -35,10 +36,7 @@ internal static class Program
 
         if (options.ShowVersion)
         {
-            var version = typeof(Program).Assembly
-                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
-                .InformationalVersion ?? "unknown";
-            Console.WriteLine($"WindowPortal {version}");
+            Console.WriteLine($"PierceView {GetProductVersion()}");
             return 0;
         }
 
@@ -52,150 +50,77 @@ internal static class Program
             return WindowInventory.PrintVisibleWindows();
         }
 
-        if (options.CompatibilityReport)
-        {
-            return WindowInventory.PrintCompatibilityReport();
-        }
-
         if (options.InspectWindow is { } inspectWindow)
         {
             return WindowHierarchyInspector.Inspect(inspectWindow, options.InspectPoint);
         }
 
-        using var controller = new WindowRegionController(options.Radius);
-        using var visualOverlay = new DwmPortalOverlay(options.Radius);
-        RegisterEmergencyRestoration(controller, visualOverlay);
+        if (options.ProbeWindow is { } probeWindow)
+        {
+            return RunProbeMode(options, probeWindow);
+        }
 
-        return options.ProbeWindow is { } probeWindow
-            ? RunProbe(
-                controller,
-                visualOverlay,
-                probeWindow,
-                options.ProbeDurationMilliseconds,
-                options.Radius)
-            : RunInteractive(controller, visualOverlay, options.PollMilliseconds);
+        return RunTrayApplication(options);
     }
 
-    private static int RunInteractive(
-        WindowRegionController controller,
-        DwmPortalOverlay visualOverlay,
-        int pollMilliseconds)
+    private static int RunTrayApplication(PortalOptions options)
     {
-        Console.WriteLine("WindowPortal 技术验证已运行。");
-        Console.WriteLine("按住 F8：在鼠标所在窗口创建跟随圆洞；松开 F8：恢复窗口。");
-        Console.WriteLine("Esc 或 Ctrl+Shift+Q：恢复窗口并退出。");
-        Console.WriteLine();
+        var settingsPath = Environment.GetEnvironmentVariable("PIERCEVIEW_SETTINGS_PATH");
+        var settingsStore = new UserSettingsStore(
+            string.IsNullOrWhiteSpace(settingsPath) ? null : settingsPath);
+        var firstRun = !settingsStore.Exists;
+        var settings = settingsStore.Load();
+        if (options.RadiusWasSpecified)
+        {
+            settings = settings with { Radius = options.Radius };
+        }
 
-        var wasActivationHeld = false;
-        var wasEscapeHeld = false;
-        var wasExitChordHeld = false;
-        var visualWarningShown = false;
+        using var mutex = new Mutex(
+            initiallyOwned: true,
+            SingleInstanceName,
+            out var ownsMutex);
+        if (!ownsMutex)
+        {
+            var text = Localizer.Get(settings.Language);
+            MessageBox.Show(
+                text.AlreadyRunning,
+                "寸镜 / PierceView",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return 0;
+        }
 
         try
         {
-            while (!_exitRequested)
-            {
-                var loopStartedAt = Stopwatch.GetTimestamp();
-                var activationHeld = NativeMethods.IsKeyDown(NativeMethods.VkF8);
-                var escapeHeld = NativeMethods.IsKeyDown(NativeMethods.VkEscape);
-                var exitChordHeld =
-                    NativeMethods.IsKeyDown(NativeMethods.VkControl) &&
-                    NativeMethods.IsKeyDown(NativeMethods.VkShift) &&
-                    NativeMethods.IsKeyDown(NativeMethods.VkQ);
-
-                if ((escapeHeld && !wasEscapeHeld) || (exitChordHeld && !wasExitChordHeld))
-                {
-                    _exitRequested = true;
-                    continue;
-                }
-
-                if (activationHeld && !wasActivationHeld)
-                {
-                    visualWarningShown = false;
-                    if (controller.TryBeginAtCursor(out var message))
-                    {
-                        Console.WriteLine(message);
-                    }
-                    else
-                    {
-                        Console.Error.WriteLine(message);
-                    }
-                }
-
-                if (activationHeld && controller.IsActive)
-                {
-                    if (!NativeMethods.GetCursorPos(out var cursor))
-                    {
-                        if (!visualWarningShown)
-                        {
-                            Console.Error.WriteLine("无法读取鼠标位置。");
-                            visualWarningShown = true;
-                        }
-                    }
-                    else if (visualOverlay.IsVisible)
-                    {
-                        // 同一鼠标采样先提交完整视觉帧，再立即移动命中测试圆洞。
-                        // 如果视觉帧未能提交，实体圆洞也保持原位，避免再次分裂成两个圆。
-                        if (!visualOverlay.TryUpdate(cursor, out var visualError))
-                        {
-                            if (!visualWarningShown)
-                            {
-                                Console.Error.WriteLine($"视觉穿透暂不可用：{visualError}");
-                                visualWarningShown = true;
-                            }
-                        }
-                        else if (!controller.Update(cursor, out var error))
-                        {
-                            visualOverlay.Hide();
-                            Console.Error.WriteLine(error);
-                        }
-                    }
-                    else if (!controller.Update(cursor, out var error))
-                    {
-                        visualOverlay.Hide();
-                        Console.Error.WriteLine(error);
-                    }
-                    else if (!TryUpdateVisualPortal(controller, visualOverlay, cursor, out var visualError) &&
-                             !visualWarningShown)
-                    {
-                        Console.Error.WriteLine($"视觉穿透暂不可用：{visualError}");
-                        visualWarningShown = true;
-                    }
-                }
-
-                if (!activationHeld && wasActivationHeld && controller.IsActive)
-                {
-                    var restored = controller.ActiveDescription;
-                    visualOverlay.Hide();
-                    controller.Restore();
-                    Console.WriteLine($"已恢复：{restored}");
-                }
-
-                wasActivationHeld = activationHeld;
-                wasEscapeHeld = escapeHeld;
-                wasExitChordHeld = exitChordHeld;
-
-                // --poll-ms 表示完整轮询周期，而不是每帧处理完成后的额外延迟。
-                var remainingMilliseconds =
-                    pollMilliseconds - Stopwatch.GetElapsedTime(loopStartedAt).TotalMilliseconds;
-                if (remainingMilliseconds >= 1)
-                {
-                    Thread.Sleep((int)Math.Floor(remainingMilliseconds));
-                }
-                else
-                {
-                    Thread.Yield();
-                }
-            }
-
+            _ = Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            using var context = new PierceViewApplicationContext(
+                settingsStore,
+                settings,
+                firstRun,
+                options.PollMilliseconds,
+                options.TraySmokeTestMilliseconds);
+            Application.Run(context);
             return 0;
         }
         finally
         {
-            visualOverlay.Hide();
-            controller.Restore();
-            Console.WriteLine("窗口已恢复，WindowPortal 已退出。");
+            mutex.ReleaseMutex();
         }
+    }
+
+    private static int RunProbeMode(PortalOptions options, nint probeWindow)
+    {
+        using var controller = new WindowRegionController(options.Radius);
+        using var visualOverlay = new DwmPortalOverlay(options.Radius);
+        RegisterEmergencyRestoration(controller, visualOverlay);
+        return RunProbe(
+            controller,
+            visualOverlay,
+            probeWindow,
+            options.ProbeDurationMilliseconds,
+            options.Radius);
     }
 
     private static int RunProbe(
@@ -208,7 +133,6 @@ internal static class Program
         Console.WriteLine($"开始探测窗口 0x{window:X}。");
         Console.WriteLine($"前台核对：当前前台 HWND=0x{NativeMethods.GetForegroundWindow():X}。");
         var originalRegionType = WindowRegionController.ReadWindowRegionType(window);
-
         if (!controller.TryBegin(window, out var message))
         {
             Console.Error.WriteLine(message);
@@ -216,138 +140,120 @@ internal static class Program
         }
 
         Console.WriteLine(message);
-        var exitCode = 0;
-
+        var result = 0;
         try
         {
             if (!NativeMethods.GetWindowRect(window, out var rect))
             {
                 Console.Error.WriteLine("无法读取探测窗口尺寸。");
-                exitCode = 3;
+                return 3;
             }
-            else
+
+            var center = new NativeMethods.Point(
+                rect.Left + rect.Width / 2,
+                rect.Top + rect.Height / 2);
+            var destination = new NativeMethods.Point(
+                rect.Left + rect.Width * 3 / 4,
+                rect.Top + rect.Height / 2);
+
+            if (!controller.Update(center, out var regionError))
             {
-                var center = new NativeMethods.Point(
-                    rect.Left + (rect.Width / 2),
-                    rect.Top + (rect.Height / 2));
-                var movedCenter = new NativeMethods.Point(
-                    rect.Left + ((rect.Width * 3) / 4),
-                    rect.Top + (rect.Height / 2));
+                Console.Error.WriteLine(regionError);
+                return 3;
+            }
 
-                if (!controller.Update(center, out var firstError))
+            if (!TryUpdateVisualPortal(controller, visualOverlay, center, out var visualError))
+            {
+                Console.Error.WriteLine("视觉穿透探测失败：" + visualError);
+                result = 6;
+            }
+
+            var centerInspection = controller.InspectCurrentHole(center);
+            Console.WriteLine(
+                $"中心探测：区域类型={centerInspection.RegionType}，" +
+                $"圆心排除={centerInspection.CenterExcluded}：{centerInspection.Detail}");
+            if (!centerInspection.CenterExcluded)
+            {
+                result = 4;
+            }
+
+            Thread.Sleep(500);
+
+            if (result == 0)
+            {
+                var frameTimes = new List<double>(30);
+                for (var frame = 1; frame <= 30; frame++)
                 {
-                    Console.Error.WriteLine(firstError);
-                    exitCode = 3;
-                }
-                else
-                {
-                    if (!TryUpdateVisualPortal(controller, visualOverlay, center, out var visualError))
+                    var point = new NativeMethods.Point(
+                        center.X + (destination.X - center.X) * frame / 30,
+                        center.Y + (destination.Y - center.Y) * frame / 30);
+                    var frameStartedAt = Stopwatch.GetTimestamp();
+                    if (!visualOverlay.TryUpdate(point, out var updateError))
                     {
-                        Console.Error.WriteLine($"视觉穿透探测失败：{visualError}");
-                        exitCode = 6;
+                        Console.Error.WriteLine("视觉穿透移动失败：" + updateError);
+                        result = 6;
+                        break;
                     }
 
-                    var firstInspection = controller.InspectCurrentHole(center);
-                    Console.WriteLine(
-                        $"中心探测：区域类型={firstInspection.RegionType}，圆心排除={firstInspection.CenterExcluded}：{firstInspection.Detail}");
-
-                    if (!firstInspection.CenterExcluded)
+                    if (!controller.Update(point, out var moveError))
                     {
-                        exitCode = 4;
+                        Console.Error.WriteLine(moveError);
+                        result = 3;
+                        break;
                     }
 
-                    // 给诊断截图和非激活点击测试留出一个稳定的中心帧。
-                    Thread.Sleep(500);
-                }
-
-                if (exitCode == 0)
-                {
-                    const int sweepFrameCount = 30;
-                    var frameDurations = new List<double>(sweepFrameCount);
-                    for (var frame = 1; frame <= sweepFrameCount; frame++)
-                    {
-                        var frameCenter = new NativeMethods.Point(
-                            center.X + (((movedCenter.X - center.X) * frame) / sweepFrameCount),
-                            center.Y + (((movedCenter.Y - center.Y) * frame) / sweepFrameCount));
-                        var startedAt = Stopwatch.GetTimestamp();
-
-                        if (!visualOverlay.TryUpdate(frameCenter, out var visualError))
-                        {
-                            Console.Error.WriteLine($"视觉穿透移动失败：{visualError}");
-                            exitCode = 6;
-                            break;
-                        }
-
-                        if (!controller.Update(frameCenter, out var moveError))
-                        {
-                            Console.Error.WriteLine(moveError);
-                            exitCode = 3;
-                            break;
-                        }
-
-                        frameDurations.Add(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
-                        Thread.Sleep(8);
-                    }
-
-                    if (frameDurations.Count > 0)
-                    {
-                        Console.WriteLine(
-                            $"连续换帧：{frameDurations.Count} 帧，平均={frameDurations.Average():F2}ms，最慢={frameDurations.Max():F2}ms。"
-                        );
-                    }
+                    frameTimes.Add(Stopwatch.GetElapsedTime(frameStartedAt).TotalMilliseconds);
+                    Thread.Sleep(8);
                 }
 
-                if (exitCode == 0)
+                if (frameTimes.Count > 0)
                 {
-                    var movedInspection = controller.InspectCurrentHole(movedCenter);
                     Console.WriteLine(
-                        $"移动探测：区域类型={movedInspection.RegionType}，新圆心排除={movedInspection.CenterExcluded}：{movedInspection.Detail}");
+                        $"连续换帧：{frameTimes.Count} 帧，" +
+                        $"平均={frameTimes.Average():F2}ms，最慢={frameTimes.Max():F2}ms。");
+                }
+            }
 
-                    if (!movedInspection.CenterExcluded)
-                    {
-                        exitCode = 4;
-                    }
+            if (result == 0)
+            {
+                var movedInspection = controller.InspectCurrentHole(destination);
+                Console.WriteLine(
+                    $"移动探测：区域类型={movedInspection.RegionType}，" +
+                    $"新圆心排除={movedInspection.CenterExcluded}：{movedInspection.Detail}");
+                if (!movedInspection.CenterExcluded)
+                {
+                    result = 4;
+                }
 
-                    if (Math.Abs(movedCenter.X - center.X) > radius + 2)
+                if (Math.Abs(destination.X - center.X) > radius + 2)
+                {
+                    var oldCenterRestored = !controller.InspectCurrentHole(center).CenterExcluded;
+                    Console.WriteLine($"旧圆心重新纳入窗口区域={oldCenterRestored}。");
+                    if (!oldCenterRestored)
                     {
-                        var previousCenterInspection = controller.InspectCurrentHole(center);
-                        var previousCenterRestored = !previousCenterInspection.CenterExcluded;
-                        Console.WriteLine($"旧圆心重新纳入窗口区域={previousCenterRestored}。");
-                        if (!previousCenterRestored)
-                        {
-                            exitCode = 4;
-                        }
-                    }
-
-                    var hitChild = NativeMethods.WindowFromPoint(movedCenter);
-                    var hitRoot = hitChild == nint.Zero
-                        ? nint.Zero
-                        : NativeMethods.GetAncestor(hitChild, NativeMethods.GaRoot);
-                    NativeMethods.GetWindowThreadProcessId(hitRoot, out var hitProcessId);
-                    var targetWindowIsExcluded = hitRoot != nint.Zero && hitRoot != window;
-                    Console.WriteLine(
-                        $"穿透命中：HWND=0x{hitRoot:X}，进程={hitProcessId}，已排除目标窗口={targetWindowIsExcluded}。"
-                    );
-                    if (!targetWindowIsExcluded)
-                    {
-                        exitCode = 7;
+                        result = 4;
                     }
                 }
 
-                if (exitCode == 0)
+                var hit = NativeMethods.WindowFromPoint(destination);
+                var hitRoot = hit == nint.Zero
+                    ? nint.Zero
+                    : NativeMethods.GetAncestor(hit, NativeMethods.GaRoot);
+                NativeMethods.GetWindowThreadProcessId(hitRoot, out var processId);
+                var hitBackground = hitRoot != nint.Zero && hitRoot != window;
+                Console.WriteLine(
+                    $"穿透命中：HWND=0x{hitRoot:X}，进程={processId}，" +
+                    $"已排除目标窗口={hitBackground}。");
+                if (!hitBackground)
                 {
-                    Thread.Sleep(durationMilliseconds);
-                    Console.WriteLine(
-                        $"前台焦点守卫：回滚次数={visualOverlay.ForegroundRecoveryCount}。"
-                    );
-                    Console.WriteLine(
-                        $"受限层级提升：次数={visualOverlay.BackgroundPromotionCount}。"
-                    );
-                    Console.WriteLine(
-                        $"多层合成：可渲染层数={visualOverlay.VisibleLayerCount}；" +
-                        visualOverlay.CompatibilitySummary
-                    );
+                    result = 7;
                 }
+            }
+
+            if (result == 0)
+            {
+                Thread.Sleep(durationMilliseconds);
+                Console.WriteLine($"前台焦点守卫：回滚次数={visualOverlay.ForegroundRecoveryCount}。");
             }
         }
         finally
@@ -358,11 +264,11 @@ internal static class Program
         }
 
         var restoredRegionType = WindowRegionController.ReadWindowRegionType(window);
-        var regionTypeRestored = restoredRegionType == originalRegionType;
+        var restored = restoredRegionType == originalRegionType;
         Console.WriteLine(
-            $"恢复核对：原始区域类型={originalRegionType}，恢复后区域类型={restoredRegionType}，一致={regionTypeRestored}。");
-
-        return !regionTypeRestored && exitCode == 0 ? 5 : exitCode;
+            $"恢复核对：原始区域类型={originalRegionType}，" +
+            $"恢复后区域类型={restoredRegionType}，一致={restored}。");
+        return restored || result != 0 ? result : 5;
     }
 
     private static bool TryUpdateVisualPortal(
@@ -380,26 +286,17 @@ internal static class Program
         var sourceWindow = sourceChild == nint.Zero
             ? nint.Zero
             : NativeMethods.GetAncestor(sourceChild, NativeMethods.GaRoot);
-
         if (sourceWindow == nint.Zero || sourceWindow == controller.ActiveWindow)
         {
-            error = "没有识别到宿主窗口下方的可视源窗口。";
+            error = "没有识别到宿主窗口下方的单层视觉来源。";
             return false;
         }
 
-        var shown = visualOverlay.TryShow(
+        return visualOverlay.TryShow(
             sourceWindow,
             controller.ActiveWindow,
             screenPoint,
             out error);
-        if (shown)
-        {
-            Console.WriteLine(
-                $"多层合成已启用：可渲染层数={visualOverlay.VisibleLayerCount}；" +
-                visualOverlay.CompatibilitySummary);
-        }
-
-        return shown;
     }
 
     private static void RegisterEmergencyRestoration(
@@ -411,9 +308,7 @@ internal static class Program
             eventArgs.Cancel = true;
             visualOverlay.Hide();
             controller.Restore();
-            _exitRequested = true;
         };
-
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         {
             visualOverlay.Hide();
@@ -426,37 +321,58 @@ internal static class Program
         };
     }
 
+    private static string GetProductVersion()
+    {
+        var attribute = typeof(Program).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>();
+        return attribute?.InformationalVersion ?? "unknown";
+    }
+
+    private static void ConfigureRedirectedConsole()
+    {
+        try
+        {
+            var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+            var standardOutput = Console.OpenStandardOutput();
+            if (!ReferenceEquals(standardOutput, Stream.Null))
+            {
+                Console.SetOut(new StreamWriter(standardOutput, utf8) { AutoFlush = true });
+            }
+
+            var standardError = Console.OpenStandardError();
+            if (!ReferenceEquals(standardError, Stream.Null))
+            {
+                Console.SetError(new StreamWriter(standardError, utf8) { AutoFlush = true });
+            }
+        }
+        catch (IOException)
+        {
+            // A normal GUI-subsystem launch has no console streams.
+        }
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine(
-            """
-            WindowPortal - Windows 圆形窗口打孔技术验证
-
-            用法：
-              WindowPortal [--radius <像素>] [--poll-ms <毫秒>]
-              WindowPortal --probe-hwnd <句柄> [--probe-duration-ms <毫秒>] [--radius <像素>]
-              WindowPortal --self-test
-              WindowPortal --list-windows
-              WindowPortal --compatibility-report
-              WindowPortal --version
-              WindowPortal --inspect-hwnd <句柄> [--inspect-point <屏幕X> <屏幕Y>]
-
-            交互控制：
-              按住 F8              创建并移动圆洞
-              松开 F8              恢复目标窗口
-              Esc / Ctrl+Shift+Q   恢复并退出
-
-            参数：
-              --radius              圆洞半径，默认 180，范围 32..2000
-              --poll-ms             鼠标轮询间隔，默认 16，范围 4..1000
-              --probe-hwnd          对指定十进制或 0x 十六进制 HWND 做短暂探测
-              --probe-duration-ms   探测持续时间，默认 1500
-              --self-test           运行无需桌面窗口的纯逻辑自检
-              --list-windows        列出可见顶层窗口、进程、类名和 HWND
-              --compatibility-report 只读评估当前窗口的视觉、交互与安全兼容性
-              --version             输出语义化版本号
-              --inspect-hwnd        输出目标窗口的父子、所有者和 Z-order 诊断
-              --inspect-point       指定诊断使用的屏幕坐标；默认使用窗口中心
-            """);
+            "寸镜 / PierceView - Windows 单层圆形透视托盘工具\n\n" +
+            "用法：\n" +
+            "  PierceView [--radius <像素>] [--poll-ms <毫秒>]\n" +
+            "  PierceView --probe-hwnd <句柄> [--probe-duration-ms <毫秒>] [--radius <像素>]\n" +
+            "  PierceView --self-test\n" +
+            "  PierceView --list-windows\n" +
+            "  PierceView --inspect-hwnd <句柄> [--inspect-point <屏幕X> <屏幕Y>]\n" +
+            "  PierceView --version\n\n" +
+            "普通运行：\n" +
+            "  启动后只进入系统托盘。按住 F8 开启透视，松开恢复。\n" +
+            "  从托盘菜单启动/暂停、设置、查看帮助或退出。\n\n" +
+            "参数：\n" +
+            "  --radius              圆半径，默认 180，范围 64..400\n" +
+            "  --poll-ms             鼠标轮询间隔，默认 16，范围 8..100\n" +
+            "  --probe-hwnd          对指定十进制或 0x 十六进制 HWND 做短暂探测\n" +
+            "  --probe-duration-ms   探测持续时间，默认 1500\n" +
+            "  --self-test           运行无需桌面窗口的纯逻辑自检\n" +
+            "  --list-windows        列出可见顶层窗口、进程、类名和 HWND\n" +
+            "  --inspect-hwnd        输出目标窗口的父子、所有者和 Z-order 诊断\n" +
+            "  --inspect-point       指定诊断坐标；默认使用窗口中心");
     }
 }
