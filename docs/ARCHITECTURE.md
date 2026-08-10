@@ -19,8 +19,8 @@ Architecture notes for the public **1.0** single-layer circular portal. This pag
   │  subtract a circle from the host window region
   └─ DwmPortalOverlay：复制固定的后方一层来源
        copy the fixed one-layer-behind source
-       ├─ 单预览窗原位更新（SetWindowRgn 圆形裁剪，移动时不换帧）
-       │  single preview, in-place move; circular SetWindowRgn; no frame swap
+       ├─ 屏外 DWM 捕获面（单张缩略图）→ 圆 alpha 蒙版 → UpdateLayeredWindow 整帧提交
+       │  off-screen DWM capture → circular alpha mask → layered present
        ├─ NonActivatingWindowGuard：临时 WS_EX_NOACTIVATE
        └─ ForegroundZOrderGuard：WinEvent 恢复宿主前台
 ```
@@ -37,7 +37,7 @@ On normal launch, `Program` creates a single-instance mutex and `PierceViewAppli
 2. 在宿主 region 中减去圆后，`WindowFromPoint` 得到该位置当前暴露的后方一层顶层窗口。After subtracting the circle, resolve the one top-level window now exposed behind the host.
 3. 本次 F8 会话固定使用这个来源，不枚举或切换更深窗口。That source stays fixed for the hold session; deeper windows are not scanned or switched to.
 4. `DwmPortalOverlay` 用 DWM thumbnail 把来源窗口对应区域画到圆形预览窗。DWM thumbnails paint the matching source region into the circular preview.
-5. 为近似圆边缘，按水平条带注册 DWM 缩略图；预览窗用 `SetWindowRgn` 裁成圆，移动时只改 Source 矩形并 `SetWindowPos` 原位移动（1.0.1 起不再双窗换帧，避免移动频闪）。Horizontal DWM strip thumbnails approximate the circle; the preview uses `SetWindowRgn` and in-place `SetWindowPos` (from 1.0.1: no dual-window frame swap while moving).
+5. 预览在屏外窗更新单张 DWM 缩略图，抓帧后做圆形预乘 alpha，再用 `UpdateLayeredWindow` 一次提交（1.0.5）。形状不依赖 `SetWindowRgn` 是否裁切 DWM。Capture one DWM thumbnail off-screen, apply circular premultiplied alpha, present with `UpdateLayeredWindow` (1.0.5).
 6. 松开 F8 时先隐藏预览，再恢复宿主 region 和来源扩展样式。On release, hide the preview, then restore the host region and source extended styles.
 
 ## 交互与前台保护 / Input and foreground protection
@@ -62,6 +62,6 @@ Release, pause, settings-driven restart, tray exit, and normal process exit shar
 
 ## 已知技术边界 / Technical boundaries
 
-条带近似圆是 1.0 稳定实现的有意选择，边缘仍可能有轻微阶梯。1.0.1 用单缓冲原位更新减轻移动频闪，但仍无法从原理上保证所有 GPU/驱动/来源窗口组合都没有偶发黑帧。更激进的合成方式不在本页承诺范围内。
+圆形由分层位图 alpha 蒙版保证。可用 `--visual-smoke` 做自动色块采样回归。个别来源窗口若 DWM 缩略图/PrintWindow 抓取失败，预览可能不可用。更激进的合成方式不在本页承诺范围内。
 
-Strip-based circular approximation is an intentional 1.0 stability choice; mild edge stair-stepping can remain. 1.0.1 uses in-place single-buffer updates to reduce move flicker, but cannot guarantee zero black frames on every GPU/driver/source-window pair. More aggressive compositing approaches are outside this document’s promises.
+The circle is guaranteed by layered bitmap alpha. `--visual-smoke` runs automated fixture sampling. Some source windows may fail DWM thumbnail/PrintWindow capture. More aggressive compositing approaches are outside this document’s promises.

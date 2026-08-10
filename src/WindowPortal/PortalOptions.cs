@@ -12,6 +12,7 @@ internal sealed record PortalOptions(
     NativeMethods.Point? InspectPoint,
     int ProbeDurationMilliseconds,
     bool SelfTest,
+    bool VisualSmoke,
     bool ListWindows,
     bool ShowVersion,
     bool ShowHelp,
@@ -28,6 +29,7 @@ internal sealed record PortalOptions(
         NativeMethods.Point? inspectPoint = null;
         var probeDurationMilliseconds = 1500;
         var selfTest = false;
+        var visualSmoke = false;
         var listWindows = false;
         var showVersion = false;
         var showHelp = false;
@@ -67,6 +69,9 @@ internal sealed record PortalOptions(
                 case "--self-test":
                     selfTest = true;
                     break;
+                case "--visual-smoke":
+                    visualSmoke = true;
+                    break;
                 case "--list-windows":
                     listWindows = true;
                     break;
@@ -92,6 +97,7 @@ internal sealed record PortalOptions(
 
         var exclusiveModeCount =
             (selfTest ? 1 : 0) +
+            (visualSmoke ? 1 : 0) +
             (listWindows ? 1 : 0) +
             (showVersion ? 1 : 0) +
             (probeWindow.HasValue ? 1 : 0) +
@@ -99,7 +105,7 @@ internal sealed record PortalOptions(
         if (exclusiveModeCount > 1)
         {
             throw new ArgumentException(
-                "--self-test、--list-windows、--version、--probe-hwnd 和 --inspect-hwnd 不能同时使用。");
+                "--self-test、--visual-smoke、--list-windows、--version、--probe-hwnd 和 --inspect-hwnd 不能同时使用。");
         }
 
         if (inspectPoint.HasValue && !inspectWindow.HasValue)
@@ -117,6 +123,7 @@ internal sealed record PortalOptions(
             inspectPoint,
             probeDurationMilliseconds,
             selfTest,
+            visualSmoke,
             listWindows,
             showVersion,
             showHelp,

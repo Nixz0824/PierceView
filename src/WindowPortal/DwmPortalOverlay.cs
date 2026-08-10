@@ -1,7 +1,7 @@
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
@@ -9,14 +9,18 @@ using System.Windows.Forms;
 namespace WindowPortal;
 
 /// <summary>
-/// DWM 圆形透视预览。移动时采用单缓冲原位更新（不每帧显隐换帧），
-/// 并用椭圆 SetWindowRgn 代替 TransparencyKey，减轻移动频闪。
+/// DWM 圆形透视预览（1.0.5）。
+/// 不用条带（条带重影）、不用「全幅+Region/双缓冲换帧」（易变方、闪圆）。
+/// 流程：屏外捕获窗上挂单张 DWM 缩略图 → 抓成位图 → CPU 圆蒙版预乘 alpha
+/// → UpdateLayeredWindow 一次提交整帧。形状与内容同帧，避免方圆叠影与换帧闪烁。
 /// </summary>
 internal sealed class DwmPortalOverlay : IDisposable
 {
 	private sealed class PortalOverlayManager : Form
 	{
-		private PortalPreviewForm? _preview;
+		private CaptureSurface? _capture;
+
+		private LayeredPortalForm? _display;
 
 		private readonly ForegroundZOrderGuard _foregroundGuard = new();
 
@@ -28,7 +32,9 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		private bool _portalVisible;
 
-		internal bool PortalVisible => _portalVisible && _preview is not null;
+		private bool _firstFrameFlushed;
+
+		internal bool PortalVisible => _portalVisible && _display is not null;
 
 		internal nint SourceWindow { get; private set; }
 
@@ -45,7 +51,6 @@ internal sealed class DwmPortalOverlay : IDisposable
 			Size = new Size(1, 1);
 			_zOrderGuardTimer = new System.Windows.Forms.Timer
 			{
-				// 不必 10ms 狂刷 Z-order；过频会加重合成抖动
 				Interval = 33
 			};
 			_zOrderGuardTimer.Tick += (_, _) => _foregroundGuard.EnsurePreserved();
@@ -66,8 +71,9 @@ internal sealed class DwmPortalOverlay : IDisposable
 				return false;
 			}
 
-			_preview = new PortalPreviewForm(radius);
-			if (!_preview.TryRegisterSource(sourceWindow, out error))
+			_capture = new CaptureSurface(radius);
+			_display = new LayeredPortalForm(radius);
+			if (!_capture.TryRegisterSource(sourceWindow, out error))
 			{
 				HidePortal();
 				return false;
@@ -80,15 +86,12 @@ internal sealed class DwmPortalOverlay : IDisposable
 				return false;
 			}
 
-			if (!_preview.TryPrepare(rect, screenCenter, radius, moveWindow: true, out error) ||
-			    !TryShowPreview(_preview, out error))
+			if (!TryPresentFrame(rect, screenCenter, radius, out error))
 			{
 				HidePortal();
 				return false;
 			}
 
-			// 首帧同步一次即可，移动路径不再每帧 DwmFlush
-			_ = NativeMethods.DwmFlush();
 			_portalVisible = true;
 			_zOrderGuardTimer.Start();
 			_lastScreenCenter = screenCenter;
@@ -104,14 +107,15 @@ internal sealed class DwmPortalOverlay : IDisposable
 		{
 			_foregroundGuard.UpdatePortalGeometry(screenCenter, radius);
 
-			if (!_portalVisible || _preview is null ||
+			if (!_portalVisible ||
+			    _capture is null ||
+			    _display is null ||
 			    !NativeMethods.GetWindowRect(SourceWindow, out var rect))
 			{
 				error = "视觉穿透源窗口已经不可用。";
 				return false;
 			}
 
-			// 位置与源窗口矩形未变：跳过（避免无意义 DWM 更新）
 			if (_lastScreenCenter is { } lastCenter &&
 			    lastCenter == screenCenter &&
 			    _lastSourceRect == rect)
@@ -120,8 +124,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 				return true;
 			}
 
-			// 单缓冲原位更新：不隐藏/显示第二窗，不每帧换帧
-			if (!_preview.TryPrepare(rect, screenCenter, radius, moveWindow: true, out error))
+			if (!TryPresentFrame(rect, screenCenter, radius, out error))
 			{
 				return false;
 			}
@@ -135,15 +138,14 @@ internal sealed class DwmPortalOverlay : IDisposable
 		internal void HidePortal()
 		{
 			_zOrderGuardTimer.Stop();
-			if (_portalVisible && _preview is not null)
-			{
-				_ = TryHidePreview(_preview, out _);
-			}
-
-			_portalVisible = false;
-			_preview?.Dispose();
+			_display?.HidePortal();
+			_capture?.Dispose();
+			_display?.Dispose();
 			_foregroundGuard.Restore();
-			_preview = null;
+			_capture = null;
+			_display = null;
+			_portalVisible = false;
+			_firstFrameFlushed = false;
 			_lastScreenCenter = null;
 			_lastSourceRect = null;
 			SourceWindow = nint.Zero;
@@ -160,84 +162,262 @@ internal sealed class DwmPortalOverlay : IDisposable
 			base.Dispose(disposing);
 		}
 
-		private static bool TryShowPreview(PortalPreviewForm preview, out string? error)
+		private bool TryPresentFrame(
+			NativeMethods.Rect sourceWindowRect,
+			NativeMethods.Point screenCenter,
+			int radius,
+			out string? error)
 		{
-			// SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER
-			const uint flags = NativeMethods.SwpShowWindow |
-			                   NativeMethods.SwpNoActivate |
-			                   NativeMethods.SwpNoMove |
-			                   NativeMethods.SwpNoSize |
-			                   NativeMethods.SwpNoOwnerZOrder;
-			if (!NativeMethods.SetWindowPos(
-				    preview.Handle,
-				    NativeMethods.HwndTopMost,
-				    0,
-				    0,
-				    0,
-				    0,
-				    flags))
+			if (_capture is null || _display is null)
 			{
-				error = LastWin32Error("无法显示视觉圆");
+				error = "视觉穿透表面尚未就绪。";
 				return false;
+			}
+
+			if (!_capture.TryUpdateSource(sourceWindowRect, screenCenter, radius, out error))
+			{
+				return false;
+			}
+
+			// 仅首帧 flush，帮助缩略图落到捕获面；移动中不再全局 flush，避免浏览器栏抖动
+			if (!_firstFrameFlushed)
+			{
+				_ = NativeMethods.DwmFlush();
+				_firstFrameFlushed = true;
+			}
+
+			if (!_capture.TryGrabFrame(out var frame, out error))
+			{
+				return false;
+			}
+
+			using (frame)
+			{
+				CircularFrameComposer.ApplyCircularPremultipliedAlpha(frame, radius);
+				if (!_display.TryPresent(frame, screenCenter.X - radius, screenCenter.Y - radius, out error))
+				{
+					return false;
+				}
 			}
 
 			error = null;
 			return true;
-		}
-
-		private static bool TryHidePreview(PortalPreviewForm preview, out string? error)
-		{
-			const uint flags = NativeMethods.SwpHideWindow |
-			                   NativeMethods.SwpNoActivate |
-			                   NativeMethods.SwpNoMove |
-			                   NativeMethods.SwpNoSize |
-			                   NativeMethods.SwpNoOwnerZOrder |
-			                   NativeMethods.SwpNoZOrder;
-			if (!NativeMethods.SetWindowPos(preview.Handle, nint.Zero, 0, 0, 0, 0, flags))
-			{
-				error = LastWin32Error("无法隐藏视觉圆");
-				return false;
-			}
-
-			error = null;
-			return true;
-		}
-
-		private static string LastWin32Error(string message)
-		{
-			var code = Marshal.GetLastWin32Error();
-			return code != 0
-				? $"{message}：{new Win32Exception(code).Message}（{code}）"
-				: message;
 		}
 	}
 
-	private sealed class PortalPreviewForm : Form
+	/// <summary>
+	/// 屏外捕获窗：只承载一张全幅 DWM 缩略图，不直接给用户看。
+	/// </summary>
+	private sealed class CaptureSurface : IDisposable
 	{
-		// 4px 条带：比 3px 略减缩略图数量，移动时 DWM 更新更轻
-		private const int BandHeight = 4;
+		private sealed class CaptureHostForm : Form
+		{
+			protected override bool ShowWithoutActivation => true;
+		}
 
-		private const int WmNcHitTest = 0x0084;
-
-		private const int WmMouseActivate = 0x0021;
-
-		private static readonly nint HtTransparent = new(-1);
-
-		private static readonly nint MaNoActivate = new(3);
-
-		private readonly int _radius;
+		private const int Offscreen = -32000;
 
 		private readonly int _diameter;
 
-		private readonly List<nint> _thumbnails = [];
+		private readonly CaptureHostForm _host;
 
-		private bool _thumbnailLayoutConfigured;
+		private nint _thumbnail;
 
-		private bool _circularRegionApplied;
+		internal CaptureSurface(int radius)
+		{
+			_diameter = checked(radius * 2 + 1);
+			_host = new CaptureHostForm
+			{
+				FormBorderStyle = FormBorderStyle.None,
+				ShowInTaskbar = false,
+				StartPosition = FormStartPosition.Manual,
+				AutoScaleMode = AutoScaleMode.None,
+				BackColor = Color.Black,
+				TopMost = false,
+				Bounds = new Rectangle(Offscreen, Offscreen, _diameter, _diameter)
+			};
+			// 强制创建句柄并显示在屏外，DWM 缩略图需要目标窗可合成
+			_ = _host.Handle;
+			_ = NativeMethods.SetWindowPos(
+				_host.Handle,
+				nint.Zero,
+				Offscreen,
+				Offscreen,
+				_diameter,
+				_diameter,
+				NativeMethods.SwpNoActivate |
+				NativeMethods.SwpNoOwnerZOrder |
+				NativeMethods.SwpNoZOrder |
+				NativeMethods.SwpShowWindow);
+		}
 
-		private int _lastX = int.MinValue;
+		internal bool TryRegisterSource(nint sourceWindow, out string? error)
+		{
+			var hr = NativeMethods.DwmRegisterThumbnail(_host.Handle, sourceWindow, out _thumbnail);
+			if (hr != 0 || _thumbnail == nint.Zero)
+			{
+				error = $"DwmRegisterThumbnail 失败：0x{hr:X8}。";
+				_thumbnail = nint.Zero;
+				return false;
+			}
 
-		private int _lastY = int.MinValue;
+			error = null;
+			return true;
+		}
+
+		internal bool TryUpdateSource(
+			NativeMethods.Rect sourceWindowRect,
+			NativeMethods.Point screenCenter,
+			int radius,
+			out string? error)
+		{
+			if (_thumbnail == nint.Zero)
+			{
+				error = "DWM 缩略图尚未注册。";
+				return false;
+			}
+
+			var source = new NativeMethods.Rect(
+				screenCenter.X - radius - sourceWindowRect.Left,
+				screenCenter.Y - radius - sourceWindowRect.Top,
+				screenCenter.X - radius - sourceWindowRect.Left + _diameter,
+				screenCenter.Y - radius - sourceWindowRect.Top + _diameter);
+
+			var properties = new NativeMethods.DwmThumbnailProperties
+			{
+				Flags = NativeMethods.DwmTnpRectDestination |
+				        NativeMethods.DwmTnpRectSource |
+				        NativeMethods.DwmTnpOpacity |
+				        NativeMethods.DwmTnpVisible |
+				        NativeMethods.DwmTnpSourceClientAreaOnly,
+				Destination = new NativeMethods.Rect(0, 0, _diameter, _diameter),
+				Source = source,
+				Opacity = byte.MaxValue,
+				Visible = true,
+				SourceClientAreaOnly = false
+			};
+
+			var hr = NativeMethods.DwmUpdateThumbnailProperties(_thumbnail, ref properties);
+			if (hr != 0)
+			{
+				error = $"DwmUpdateThumbnailProperties 失败：0x{hr:X8}。";
+				return false;
+			}
+
+			error = null;
+			return true;
+		}
+
+		internal bool TryGrabFrame(out Bitmap frame, out string? error)
+		{
+			frame = new Bitmap(_diameter, _diameter, PixelFormat.Format32bppArgb);
+			var ok = false;
+			try
+			{
+				using (var graphics = Graphics.FromImage(frame))
+				{
+					var hdc = graphics.GetHdc();
+					try
+					{
+						// 优先完整内容打印（含 DWM 合成）
+						ok = NativeMethods.PrintWindow(_host.Handle, hdc, NativeMethods.PwRenderFullContent);
+						if (!ok)
+						{
+							ok = NativeMethods.PrintWindow(_host.Handle, hdc, 0);
+						}
+
+						if (!ok)
+						{
+							var windowDc = NativeMethods.GetDC(_host.Handle);
+							if (windowDc != nint.Zero)
+							{
+								ok = NativeMethods.BitBlt(
+									hdc,
+									0,
+									0,
+									_diameter,
+									_diameter,
+									windowDc,
+									0,
+									0,
+									NativeMethods.SrcCopy);
+								_ = NativeMethods.ReleaseDC(_host.Handle, windowDc);
+							}
+						}
+					}
+					finally
+					{
+						graphics.ReleaseHdc(hdc);
+					}
+				}
+
+				if (!ok)
+				{
+					error = "无法从 DWM 捕获面抓取帧：" + new Win32Exception(Marshal.GetLastWin32Error()).Message;
+					frame.Dispose();
+					frame = null!;
+					return false;
+				}
+
+				// 全黑帧通常表示捕获失败（缩略图未合成到可抓取表面）
+				if (IsAlmostBlack(frame))
+				{
+					error = "DWM 捕获帧几乎全黑，来源窗口可能无法提供缩略图。";
+					frame.Dispose();
+					frame = null!;
+					return false;
+				}
+
+				error = null;
+				return true;
+			}
+			catch
+			{
+				frame.Dispose();
+				throw;
+			}
+		}
+
+		private static bool IsAlmostBlack(Bitmap frame)
+		{
+			// 抽样若干点，避免每帧全图扫描
+			var hits = 0;
+			var samples = 0;
+			for (var y = 4; y < frame.Height; y += Math.Max(8, frame.Height / 8))
+			{
+				for (var x = 4; x < frame.Width; x += Math.Max(8, frame.Width / 8))
+				{
+					samples++;
+					var c = frame.GetPixel(x, y);
+					if (c.R > 16 || c.G > 16 || c.B > 16)
+					{
+						hits++;
+					}
+				}
+			}
+
+			return samples > 0 && hits * 20 < samples;
+		}
+
+		public void Dispose()
+		{
+			if (_thumbnail != nint.Zero)
+			{
+				_ = NativeMethods.DwmUnregisterThumbnail(_thumbnail);
+				_thumbnail = nint.Zero;
+			}
+
+			_host.Close();
+			_host.Dispose();
+		}
+	}
+
+	/// <summary>
+	/// 分层显示窗：UpdateLayeredWindow 提交带圆 alpha 的整帧。
+	/// </summary>
+	private sealed class LayeredPortalForm : Form
+	{
+		private readonly int _diameter;
 
 		protected override bool ShowWithoutActivation => true;
 
@@ -246,213 +426,262 @@ internal sealed class DwmPortalOverlay : IDisposable
 			get
 			{
 				var createParams = base.CreateParams;
-				// WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST 由 TopMost 等处理
-				createParams.ExStyle |= 0x00000020 | 0x00000080 | 0x08000000;
+				// WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST
+				createParams.ExStyle |= unchecked((int)0x00080000) | 0x00000020 | 0x00000080 | 0x08000000 | 0x00000008;
 				return createParams;
 			}
 		}
 
-		internal PortalPreviewForm(int radius)
+		internal LayeredPortalForm(int radius)
 		{
-			_radius = radius;
 			_diameter = checked(radius * 2 + 1);
 			FormBorderStyle = FormBorderStyle.None;
 			ShowInTaskbar = false;
 			StartPosition = FormStartPosition.Manual;
 			AutoScaleMode = AutoScaleMode.None;
-			// 不用 TransparencyKey：色键在移动/重绘时极易整窗闪一下
 			BackColor = Color.Black;
 			TopMost = true;
-			// 先放到屏外，避免创建瞬间闪一下
 			Bounds = new Rectangle(-32000, -32000, _diameter, _diameter);
+			_ = Handle;
 		}
 
-		protected override void OnHandleCreated(EventArgs e)
+		internal bool TryPresent(Bitmap frame, int left, int top, out string? error)
 		{
-			base.OnHandleCreated(e);
-			ApplyCircularRegion();
-		}
-
-		internal bool TryRegisterSource(nint sourceWindow, out string? error)
-		{
-			var bandCount = (_diameter + BandHeight - 1) / BandHeight;
-			for (var i = 0; i < bandCount; i++)
+			if (frame.Width != _diameter || frame.Height != _diameter)
 			{
-				var hr = NativeMethods.DwmRegisterThumbnail(Handle, sourceWindow, out var thumbnail);
-				if (hr != 0 || thumbnail == nint.Zero)
-				{
-					error = $"DwmRegisterThumbnail 失败：0x{hr:X8}。";
-					UnregisterThumbnails();
-					return false;
-				}
-
-				_thumbnails.Add(thumbnail);
-			}
-
-			error = null;
-			return true;
-		}
-
-		/// <param name="moveWindow">
-		/// 是否移动预览窗。首次显示与光标移动都需要为 true。
-		/// </param>
-		internal bool TryPrepare(
-			NativeMethods.Rect sourceWindowRect,
-			NativeMethods.Point screenCenter,
-			int radius,
-			bool moveWindow,
-			out string? error)
-		{
-			if (_thumbnails.Count == 0)
-			{
-				error = "DWM 圆形缩略图尚未注册。";
+				error = "捕获帧尺寸与透视圆不一致。";
 				return false;
 			}
 
-			ApplyCircularRegion();
-
-			var left = screenCenter.X - radius;
-			var top = screenCenter.Y - radius;
-
-			// 先更新 DWM 源矩形（内容对齐新圆心），再移动窗口，减少“错位一帧”
-			for (var i = 0; i < _thumbnails.Count; i++)
+			var screenDc = NativeMethods.GetDC(nint.Zero);
+			if (screenDc == nint.Zero)
 			{
-				var band = CreateBandGeometry(i);
-				var sourceLeft = screenCenter.X - band.HalfWidth;
-				var sourceTop = top + band.LocalTop;
-				var destLeft = _radius - band.HalfWidth;
-
-				// 首次：写全套属性；之后移动：只改 Source（Destination 在客户区固定）
-				var flags = _thumbnailLayoutConfigured
-					? NativeMethods.DwmTnpRectSource
-					: NativeMethods.DwmTnpRectDestination |
-					  NativeMethods.DwmTnpRectSource |
-					  NativeMethods.DwmTnpOpacity |
-					  NativeMethods.DwmTnpVisible |
-					  NativeMethods.DwmTnpSourceClientAreaOnly;
-
-				var properties = new NativeMethods.DwmThumbnailProperties
-				{
-					Flags = flags,
-					Destination = new NativeMethods.Rect(
-						destLeft,
-						band.LocalTop,
-						destLeft + band.Width,
-						band.LocalTop + band.Height),
-					Source = new NativeMethods.Rect(
-						sourceLeft - sourceWindowRect.Left,
-						sourceTop - sourceWindowRect.Top,
-						sourceLeft - sourceWindowRect.Left + band.Width,
-						sourceTop - sourceWindowRect.Top + band.Height),
-					Opacity = byte.MaxValue,
-					Visible = true,
-					SourceClientAreaOnly = false
-				};
-
-				var hr = NativeMethods.DwmUpdateThumbnailProperties(_thumbnails[i], ref properties);
-				if (hr != 0)
-				{
-					error = $"DwmUpdateThumbnailProperties 失败：0x{hr:X8}。";
-					return false;
-				}
+				error = "无法获取屏幕 DC。";
+				return false;
 			}
 
-			_thumbnailLayoutConfigured = true;
-
-			if (moveWindow && (_lastX != left || _lastY != top))
+			var memDc = NativeMethods.CreateCompatibleDC(screenDc);
+			if (memDc == nint.Zero)
 			{
-				// 原位移动：不改 Z、不激活、不改尺寸，避免 Defer 显隐换帧
-				const uint moveFlags =
-					NativeMethods.SwpNoSize |
-					NativeMethods.SwpNoZOrder |
-					NativeMethods.SwpNoActivate |
-					NativeMethods.SwpNoOwnerZOrder;
-				if (!NativeMethods.SetWindowPos(Handle, nint.Zero, left, top, 0, 0, moveFlags))
+				_ = NativeMethods.ReleaseDC(nint.Zero, screenDc);
+				error = "无法创建兼容 DC。";
+				return false;
+			}
+
+			// GetHbitmap 会丢掉 alpha；用 DIB section 保留预乘 ARGB
+			if (!TryCreatePremultipliedDib(frame, out var hBitmap, out var dibBits, out error))
+			{
+				_ = NativeMethods.DeleteDC(memDc);
+				_ = NativeMethods.ReleaseDC(nint.Zero, screenDc);
+				return false;
+			}
+
+			var old = NativeMethods.SelectObject(memDc, hBitmap);
+			try
+			{
+				var dst = new NativeMethods.Point(left, top);
+				var size = new NativeMethods.Size(_diameter, _diameter);
+				var src = new NativeMethods.Point(0, 0);
+				var blend = new NativeMethods.BlendFunction
 				{
-					error = "无法移动视觉圆：" + new Win32Exception(Marshal.GetLastWin32Error()).Message;
+					BlendOp = NativeMethods.AcSrcOver,
+					BlendFlags = 0,
+					SourceConstantAlpha = 255,
+					AlphaFormat = NativeMethods.AcSrcAlpha
+				};
+
+				if (!NativeMethods.UpdateLayeredWindow(
+					    Handle,
+					    screenDc,
+					    ref dst,
+					    ref size,
+					    memDc,
+					    ref src,
+					    0,
+					    ref blend,
+					    NativeMethods.UlwAlpha))
+				{
+					error = "UpdateLayeredWindow 失败：" + new Win32Exception(Marshal.GetLastWin32Error()).Message;
 					return false;
 				}
 
-				_lastX = left;
-				_lastY = top;
+				// 确保盖在色块窗之上
+				_ = NativeMethods.SetWindowPos(
+					Handle,
+					NativeMethods.HwndTopMost,
+					left,
+					top,
+					0,
+					0,
+					NativeMethods.SwpNoSize |
+					NativeMethods.SwpNoActivate |
+					NativeMethods.SwpNoOwnerZOrder |
+					NativeMethods.SwpShowWindow);
+
+				error = null;
+				return true;
+			}
+			finally
+			{
+				_ = NativeMethods.SelectObject(memDc, old);
+				_ = NativeMethods.DeleteObject(hBitmap);
+				_ = NativeMethods.DeleteDC(memDc);
+				_ = NativeMethods.ReleaseDC(nint.Zero, screenDc);
+				_ = dibBits; // bits owned by hBitmap
+			}
+		}
+
+		private static bool TryCreatePremultipliedDib(
+			Bitmap frame,
+			out nint hBitmap,
+			out nint bits,
+			out string? error)
+		{
+			hBitmap = nint.Zero;
+			bits = nint.Zero;
+			var header = new NativeMethods.BitmapInfoHeader
+			{
+				BiSize = (uint)Marshal.SizeOf<NativeMethods.BitmapInfoHeader>(),
+				BiWidth = frame.Width,
+				// 负高度 = 顶向下 DIB，与 Bitmap 扫描行一致
+				BiHeight = -frame.Height,
+				BiPlanes = 1,
+				BiBitCount = 32,
+				BiCompression = 0
+			};
+
+			var screenDc = NativeMethods.GetDC(nint.Zero);
+			hBitmap = NativeMethods.CreateDIBSection(
+				screenDc,
+				ref header,
+				0,
+				out bits,
+				nint.Zero,
+				0);
+			_ = NativeMethods.ReleaseDC(nint.Zero, screenDc);
+
+			if (hBitmap == nint.Zero || bits == nint.Zero)
+			{
+				error = "CreateDIBSection 失败：" + new Win32Exception(Marshal.GetLastWin32Error()).Message;
+				return false;
+			}
+
+			var data = frame.LockBits(
+				new Rectangle(0, 0, frame.Width, frame.Height),
+				ImageLockMode.ReadOnly,
+				PixelFormat.Format32bppArgb);
+			try
+			{
+				var srcStride = Math.Abs(data.Stride);
+				var dstStride = frame.Width * 4;
+				var row = new byte[dstStride];
+				for (var y = 0; y < frame.Height; y++)
+				{
+					Marshal.Copy(data.Scan0 + (y * srcStride), row, 0, dstStride);
+					Marshal.Copy(row, 0, bits + (y * dstStride), dstStride);
+				}
+			}
+			finally
+			{
+				frame.UnlockBits(data);
 			}
 
 			error = null;
 			return true;
 		}
 
-		private void ApplyCircularRegion()
+		internal void HidePortal()
 		{
-			if (_circularRegionApplied || !IsHandleCreated)
+			if (!IsHandleCreated)
 			{
 				return;
 			}
 
-			// CreateEllipticRgn 右/下边界是开区间
-			var region = NativeMethods.CreateEllipticRgn(0, 0, _diameter, _diameter);
-			if (region == nint.Zero)
-			{
-				return;
-			}
-
-			// 成功时系统接管 region；失败则自行删除
-			if (NativeMethods.SetWindowRgn(Handle, region, true) == 0)
-			{
-				_ = NativeMethods.DeleteObject(region);
-				return;
-			}
-
-			_circularRegionApplied = true;
-		}
-
-		private PortalBandGeometry CreateBandGeometry(int index)
-		{
-			var localTop = index * BandHeight;
-			var height = Math.Min(BandHeight, _diameter - localTop);
-			var midY = localTop + height / 2.0 - _radius;
-			var halfWidth = Math.Max(1, (int)Math.Floor(Math.Sqrt(Math.Max(0.0, (_radius * _radius) - midY * midY))));
-			return new PortalBandGeometry(localTop, height, halfWidth);
+			_ = NativeMethods.SetWindowPos(
+				Handle,
+				nint.Zero,
+				-32000,
+				-32000,
+				0,
+				0,
+				NativeMethods.SwpHideWindow |
+				NativeMethods.SwpNoActivate |
+				NativeMethods.SwpNoSize |
+				NativeMethods.SwpNoZOrder |
+				NativeMethods.SwpNoOwnerZOrder);
 		}
 
 		protected override void WndProc(ref Message message)
 		{
-			if (message.Msg == WmNcHitTest)
+			const int wmNcHitTest = 0x0084;
+			const int wmMouseActivate = 0x0021;
+			if (message.Msg == wmNcHitTest)
 			{
-				message.Result = HtTransparent;
+				message.Result = new nint(-1); // HTTRANSPARENT
 				return;
 			}
 
-			if (message.Msg == WmMouseActivate)
+			if (message.Msg == wmMouseActivate)
 			{
-				message.Result = MaNoActivate;
+				message.Result = new nint(3); // MA_NOACTIVATE
 				return;
 			}
 
 			base.WndProc(ref message);
 		}
-
-		protected override void Dispose(bool disposing)
-		{
-			Hide();
-			UnregisterThumbnails();
-			base.Dispose(disposing);
-		}
-
-		private void UnregisterThumbnails()
-		{
-			foreach (var thumbnail in _thumbnails)
-			{
-				_ = NativeMethods.DwmUnregisterThumbnail(thumbnail);
-			}
-
-			_thumbnails.Clear();
-			_thumbnailLayoutConfigured = false;
-		}
 	}
 
-	private readonly record struct PortalBandGeometry(int LocalTop, int Height, int HalfWidth)
+	private static class CircularFrameComposer
 	{
-		internal int Width => HalfWidth * 2 + 1;
+		internal static void ApplyCircularPremultipliedAlpha(Bitmap frame, int radius)
+		{
+			var diameter = frame.Width;
+			var radiusSquared = (long)radius * radius;
+			var data = frame.LockBits(
+				new Rectangle(0, 0, frame.Width, frame.Height),
+				ImageLockMode.ReadWrite,
+				PixelFormat.Format32bppArgb);
+			try
+			{
+				var stride = Math.Abs(data.Stride);
+				var buffer = new byte[stride * frame.Height];
+				Marshal.Copy(data.Scan0, buffer, 0, buffer.Length);
+
+				for (var y = 0; y < diameter; y++)
+				{
+					var dy = y - radius;
+					var row = y * stride;
+					for (var x = 0; x < diameter; x++)
+					{
+						var dx = x - radius;
+						var i = row + (x * 4);
+						if (((long)dx * dx) + ((long)dy * dy) > radiusSquared)
+						{
+							buffer[i] = 0;
+							buffer[i + 1] = 0;
+							buffer[i + 2] = 0;
+							buffer[i + 3] = 0;
+							continue;
+						}
+
+						// 预乘 alpha（不透明圆内）
+						var b = buffer[i];
+						var g = buffer[i + 1];
+						var r = buffer[i + 2];
+						buffer[i] = b;
+						buffer[i + 1] = g;
+						buffer[i + 2] = r;
+						buffer[i + 3] = 255;
+					}
+				}
+
+				Marshal.Copy(buffer, 0, data.Scan0, buffer.Length);
+			}
+			finally
+			{
+				frame.UnlockBits(data);
+			}
+		}
 	}
 
 	private readonly int _radius;
@@ -553,7 +782,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 		}
 		catch
 		{
-			// 关闭路径忽略
+			// ignore
 		}
 	}
 
@@ -579,11 +808,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 			// ignore
 		}
 
-		if (!_thread.Join(2000))
-		{
-			// best-effort
-		}
-
+		_ = _thread.Join(2000);
 		_ready.Dispose();
 		GC.SuppressFinalize(this);
 	}

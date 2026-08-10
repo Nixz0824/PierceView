@@ -45,6 +45,11 @@ internal static class Program
             return SelfTests.Run();
         }
 
+        if (options.VisualSmoke)
+        {
+            return VisualSmokeTests.Run(options.Radius);
+        }
+
         if (options.ListWindows)
         {
             return WindowInventory.PrintVisibleWindows();
@@ -359,6 +364,7 @@ internal static class Program
             "  PierceView [--radius <像素>] [--poll-ms <毫秒>]\n" +
             "  PierceView --probe-hwnd <句柄> [--probe-duration-ms <毫秒>] [--radius <像素>]\n" +
             "  PierceView --self-test\n" +
+            "  PierceView --visual-smoke [--radius <像素>]\n" +
             "  PierceView --list-windows\n" +
             "  PierceView --inspect-hwnd <句柄> [--inspect-point <屏幕X> <屏幕Y>]\n" +
             "  PierceView --version\n\n" +
@@ -371,6 +377,7 @@ internal static class Program
             "  --probe-hwnd          对指定十进制或 0x 十六进制 HWND 做短暂探测\n" +
             "  --probe-duration-ms   探测持续时间，默认 1500\n" +
             "  --self-test           运行无需桌面窗口的纯逻辑自检\n" +
+            "  --visual-smoke        自动视觉冒烟（自建色块窗采样圆/闪黑回归）\n" +
             "  --list-windows        列出可见顶层窗口、进程、类名和 HWND\n" +
             "  --inspect-hwnd        输出目标窗口的父子、所有者和 Z-order 诊断\n" +
             "  --inspect-point       指定诊断坐标；默认使用窗口中心");

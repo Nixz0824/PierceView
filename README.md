@@ -10,7 +10,7 @@
 
 PierceView is a lightweight Windows tray utility. Hold `F8` to open a circular portal around the pointer, then view, scroll, or click the single window directly behind your current work. Release the key to restore the foreground window immediately.
 
-**当前版本 / Current version:** `1.0.1` — 公开可用版本（含移动频闪修复）。Public release with portal-move flicker fix.
+**当前版本 / Current version:** `1.0.6` — 本地：每次启用弹出就绪提示。Local: ready tip on every enable.
 
 ## 为什么是寸镜 / Why PierceView
 

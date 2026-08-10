@@ -97,7 +97,43 @@ internal static class NativeMethods
 
 	internal const uint SwpNoOwnerZOrder = 512u;
 
+	internal const uint UlwAlpha = 2u;
+
+	internal const byte AcSrcOver = 0;
+
+	internal const byte AcSrcAlpha = 1;
+
+	internal const uint PwRenderFullContent = 2u;
+
+	internal const uint SrcCopy = 0x00CC0020;
+
 	internal static readonly nint HwndTopMost = new IntPtr(-1);
+
+	[StructLayout(LayoutKind.Sequential)]
+	internal struct BlendFunction
+	{
+		internal byte BlendOp;
+
+		internal byte BlendFlags;
+
+		internal byte SourceConstantAlpha;
+
+		internal byte AlphaFormat;
+	}
+
+	[StructLayout(LayoutKind.Sequential)]
+	internal struct Size
+	{
+		internal int Cx;
+
+		internal int Cy;
+
+		internal Size(int cx, int cy)
+		{
+			Cx = cx;
+			Cy = cy;
+		}
+	}
 
 	internal const int VkF8 = 119;
 
@@ -250,6 +286,87 @@ internal static class NativeMethods
 
 	[DllImport("dwmapi.dll")]
 	internal static extern int DwmUpdateThumbnailProperties(nint thumbnail, ref DwmThumbnailProperties properties);
+
+	[DllImport("user32.dll", SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	internal static extern bool UpdateLayeredWindow(
+		nint window,
+		nint hdcDst,
+		ref Point pptDst,
+		ref Size psize,
+		nint hdcSrc,
+		ref Point pptSrc,
+		int crKey,
+		ref BlendFunction pblend,
+		uint dwFlags);
+
+	[DllImport("user32.dll", SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	internal static extern bool PrintWindow(nint window, nint hdcBlt, uint flags);
+
+	[DllImport("user32.dll", SetLastError = true)]
+	internal static extern nint GetDC(nint window);
+
+	[DllImport("user32.dll", SetLastError = true)]
+	internal static extern int ReleaseDC(nint window, nint hdc);
+
+	[DllImport("gdi32.dll", SetLastError = true)]
+	internal static extern nint CreateCompatibleDC(nint hdc);
+
+	[DllImport("gdi32.dll", SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	internal static extern bool DeleteDC(nint hdc);
+
+	[DllImport("gdi32.dll", SetLastError = true)]
+	internal static extern nint SelectObject(nint hdc, nint obj);
+
+	[DllImport("gdi32.dll", SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	internal static extern bool BitBlt(
+		nint hdcDest,
+		int xDest,
+		int yDest,
+		int width,
+		int height,
+		nint hdcSrc,
+		int xSrc,
+		int ySrc,
+		uint rop);
+
+	[DllImport("gdi32.dll", SetLastError = true)]
+	internal static extern nint CreateDIBSection(
+		nint hdc,
+		ref BitmapInfoHeader bmi,
+		uint usage,
+		out nint bits,
+		nint section,
+		uint offset);
+
+	[StructLayout(LayoutKind.Sequential)]
+	internal struct BitmapInfoHeader
+	{
+		internal uint BiSize;
+
+		internal int BiWidth;
+
+		internal int BiHeight;
+
+		internal ushort BiPlanes;
+
+		internal ushort BiBitCount;
+
+		internal uint BiCompression;
+
+		internal uint BiSizeImage;
+
+		internal int BiXPelsPerMeter;
+
+		internal int BiYPelsPerMeter;
+
+		internal uint BiClrUsed;
+
+		internal uint BiClrImportant;
+	}
 
 	internal static void TryEnablePerMonitorDpiAwareness()
 	{

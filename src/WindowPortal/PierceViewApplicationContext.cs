@@ -17,7 +17,7 @@ internal sealed class PierceViewApplicationContext : ApplicationContext
     private readonly int _pollMilliseconds;
     private UserSettings _settings;
     private SettingsForm? _settingsForm;
-    private System.Windows.Forms.Timer? _firstRunTimer;
+    private System.Windows.Forms.Timer? _readyTipTimer;
     private System.Windows.Forms.Timer? _autoExitTimer;
     private bool _runtimeEnabled;
     private bool _exiting;
@@ -62,10 +62,15 @@ internal sealed class PierceViewApplicationContext : ApplicationContext
         ApplyLanguage();
         StartRuntime();
 
+        // 仅首次写入默认设置文件；就绪提醒改为每次启用都提示
         if (firstRun)
         {
             PersistFirstRunDefaults();
-            ShowFirstRunTipAfterStartup();
+        }
+
+        if (_runtimeEnabled)
+        {
+            ShowReadyTip();
         }
 
         if (autoExitMilliseconds is { } delay)
@@ -99,6 +104,11 @@ internal sealed class PierceViewApplicationContext : ApplicationContext
         else
         {
             StartRuntime();
+            if (_runtimeEnabled)
+            {
+                // 托盘「启动透视」重新启用时也提醒一次
+                ShowReadyTip();
+            }
         }
     }
 
@@ -258,15 +268,20 @@ internal sealed class PierceViewApplicationContext : ApplicationContext
         }
     }
 
-    private void ShowFirstRunTipAfterStartup()
+    /// <summary>
+    /// 托盘气泡提醒：每次程序启动启用、或从暂停重新启动透视时提示按住 F8。
+    /// </summary>
+    private void ShowReadyTip()
     {
-        _firstRunTimer = new System.Windows.Forms.Timer { Interval = 700 };
-        _firstRunTimer.Tick += (_, _) =>
+        _readyTipTimer?.Stop();
+        _readyTipTimer?.Dispose();
+        _readyTipTimer = new System.Windows.Forms.Timer { Interval = 700 };
+        _readyTipTimer.Tick += (_, _) =>
         {
-            _firstRunTimer?.Stop();
-            _firstRunTimer?.Dispose();
-            _firstRunTimer = null;
-            if (_exiting)
+            _readyTipTimer?.Stop();
+            _readyTipTimer?.Dispose();
+            _readyTipTimer = null;
+            if (_exiting || !_runtimeEnabled)
             {
                 return;
             }
@@ -278,7 +293,7 @@ internal sealed class PierceViewApplicationContext : ApplicationContext
                 text.FirstRunBody,
                 ToolTipIcon.Info);
         };
-        _firstRunTimer.Start();
+        _readyTipTimer.Start();
     }
 
     private void ExitAfter(int milliseconds)
@@ -304,9 +319,9 @@ internal sealed class PierceViewApplicationContext : ApplicationContext
         _exiting = true;
         _runtime.ErrorOccurred -= OnRuntimeError;
         _runtime.Dispose();
-        _firstRunTimer?.Stop();
-        _firstRunTimer?.Dispose();
-        _firstRunTimer = null;
+        _readyTipTimer?.Stop();
+        _readyTipTimer?.Dispose();
+        _readyTipTimer = null;
         _autoExitTimer?.Stop();
         _autoExitTimer?.Dispose();
         _autoExitTimer = null;

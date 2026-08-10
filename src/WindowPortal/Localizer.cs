@@ -62,8 +62,8 @@ internal sealed record UiText(
         "退出",
         "寸镜 PierceView — 透视已启动",
         "寸镜 PierceView — 透视已暂停",
-        "寸镜已就绪",
-        "把鼠标移到目标应用上，按住 F8 开始透视。",
+        "寸镜已启用",
+        "把鼠标移到目标应用上，按住 F8 开始透视。松开 F8 即可恢复。",
         "寸镜 / PierceView 帮助",
         "按住 F8：不用来回 Alt+Tab，直接查看、滚动或点击当前窗口后面的一层普通应用。\n" +
         "松开 F8：立即关闭透视并恢复当前窗口。\n\n" +
@@ -90,8 +90,8 @@ internal sealed record UiText(
         "Exit",
         "PierceView — Portal enabled",
         "PierceView — Portal paused",
-        "PierceView is ready",
-        "Move the cursor over an app, then hold F8 to open the portal.",
+        "PierceView enabled",
+        "Move the cursor over an app, then hold F8 to open the portal. Release F8 to restore.",
         "PierceView Help",
         "Hold F8: skip repetitive Alt+Tab switching and directly view, scroll, or click one ordinary app behind the current window.\n" +
         "Release F8: close the portal and restore the current window immediately.\n\n" +

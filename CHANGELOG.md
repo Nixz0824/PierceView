@@ -10,6 +10,43 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 - （暂无）
 
+## [1.0.6] - 2026-08-10
+
+### Changed
+
+- 就绪提示改为**每次启用**都弹出托盘气泡（程序启动启用、以及托盘「启动透视」从暂停恢复时），不再仅首次运行一次。
+- Ready tip balloon now shows on **every enable** (app launch and tray “Start portal” after pause), not only the first run.
+
+## [1.0.5] - 2026-08-10
+
+### Fixed
+
+- 重做透视合成：屏外单张 DWM 缩略图捕获 → **圆形预乘 alpha 蒙版** → `UpdateLayeredWindow` 整帧提交。避免「全幅+Region 变方/闪圆」与「条带重影」「双缓冲换帧闪烁」。
+- Rebuild portal compositing: off-screen single DWM thumbnail capture → **circular premultiplied alpha mask** → one `UpdateLayeredWindow` present. Avoids square/region flash, band ghosting, and dual-buffer flicker.
+- 新增 `--visual-smoke` 自动视觉冒烟（自建红/绿窗采样圆角），减少纯手测回归。
+- Add `--visual-smoke` automated visual smoke (red/green fixture pixel checks).
+
+## [1.0.4] - 2026-08-10
+
+### Fixed
+
+- 明显减轻移动时圆内「重影/拖影」：去掉多条带非原子更新，改为**每缓冲单张全幅 DWM 缩略图**；移动时在隐藏缓冲上整帧准备后**原子换显**，避免「改源再移窗」错帧；换帧后强制隐藏并停放旧窗；每帧强制 `Form.Region` 保持圆形。
+- Greatly reduce in-portal ghosting while moving: one full DWM thumbnail per buffer (no multi-band tear), prepare the hidden buffer then atomically present, force-hide/park the previous frame, and re-apply circular `Form.Region` each update.
+
+## [1.0.3] - 2026-08-10
+
+### Fixed
+
+- 修复 1.0.2 透视变成「方框+圆」叠影、随后只剩矩形的问题：取消双窗换帧（避免两窗叠显），恢复**条带缩略图保证圆内容**，并用每帧强制的 `Form.Region` 椭圆裁掉条带外黑底；移动路径去掉 `DwmFlush` 以减轻浏览器标题栏/地址栏抖动。
+- Fix 1.0.2 portal becoming a rectangle/circle stack then a plain rectangle: drop dual-window swap, restore **band thumbnails for circular content**, re-apply `Form.Region` every update to clip black outside the circle; skip move-path `DwmFlush` to reduce chrome/title-bar jitter.
+
+## [1.0.2] - 2026-08-10
+
+### Fixed
+
+- 减轻按住 F8 **移动时圆内画面重影/抖动**：改用**单张全幅 DWM 缩略图**（圆由 `SetWindowRgn` 裁剪，不再用多条带非原子更新），并恢复**双缓冲准备后原子换帧**，避免“改源再移窗”的错帧拖影；仍不使用 `TransparencyKey`。
+- Reduce **in-portal ghosting/jitter while moving** under F8: one full-frame DWM thumbnail (circle via `SetWindowRgn`, no multi-band partial updates) and dual-buffer prepare-then-atomic swap so position and content stay aligned; still no `TransparencyKey`.
+
 ## [1.0.1] - 2026-08-10
 
 ### Fixed
