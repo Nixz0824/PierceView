@@ -10,7 +10,7 @@
 
 PierceView is a lightweight Windows tray utility. Hold `F8` to open a circular portal around the pointer, then view, scroll, or click the single window directly behind your current work. Release the key to restore the foreground window immediately.
 
-**当前版本 / Current version:** `1.0.0` — 首个公开可用版本。First public release.
+**当前版本 / Current version:** `1.0.1` — 公开可用版本（含移动频闪修复）。Public release with portal-move flicker fix.
 
 ## 为什么是寸镜 / Why PierceView
 
@@ -42,8 +42,8 @@ Version 1.0 uses a single-layer circular core. Each F8 session keeps one visual 
 
 | 文件 / File | 用途 / Purpose | SHA256 |
 |---|---|---|
-| [PierceView-v1.0.0-win-x64.zip](../../releases/download/v1.0.0/PierceView-v1.0.0-win-x64.zip) | 推荐下载包 / Recommended package | `588E383F4B8D6BC8CA31F58D0473B3ED7AF09899CFD4711FE8C7C4B642025839` |
-| `PierceView.exe` | ZIP 内的自包含程序 / Self-contained app inside the ZIP | `F5955A08ED9EFF14EC39E4EFFE49D0BA520771889D17B1B3E0F5AF56DEC8BEB4` |
+| [PierceView-v1.0.1-win-x64.zip](../../releases/download/v1.0.1/PierceView-v1.0.1-win-x64.zip) | 推荐下载包 / Recommended package | `B37355B6A20FA1B625995CB59BF3343D388BAB8B864CA81263851EE23D47EF4E` |
+| `PierceView.exe` | ZIP 内的自包含程序 / Self-contained app inside the ZIP | `82C3D33D5E4E2730D291BD893298533DC1DAACC3B76F2E39377BD1B6928A1986` |
 
 当前发布包尚未做 Windows 代码签名（Authenticode），系统可能提示“未知发布者”。这表示 Windows 无法通过证书确认发布者身份，**不是**程序缺少产品名或图标。请只从本仓库 [Releases](../../releases) 下载，并用上表 SHA256 校验；来源不确定时不要运行。
 

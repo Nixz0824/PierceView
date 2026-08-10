@@ -10,6 +10,13 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 - （暂无）
 
+## [1.0.1] - 2026-08-10
+
+### Fixed
+
+- 降低按住 F8 移动透视圆时的画面频闪：移动路径改为单缓冲原位更新（不再每帧显隐换帧），并用圆形 `SetWindowRgn` 替代 `TransparencyKey` 色键。
+- Reduce portal flicker while moving under F8: in-place single-buffer updates (no per-frame show/hide swap) and circular `SetWindowRgn` instead of `TransparencyKey`.
+
 ## [1.0.0] - 2026-08-10
 
 首个公开版本。单层圆形透视托盘工具，可直接下载使用。

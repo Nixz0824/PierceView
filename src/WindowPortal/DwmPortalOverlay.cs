@@ -8,15 +8,17 @@ using System.Windows.Forms;
 
 namespace WindowPortal;
 
+/// <summary>
+/// DWM 圆形透视预览。移动时采用单缓冲原位更新（不每帧显隐换帧），
+/// 并用椭圆 SetWindowRgn 代替 TransparencyKey，减轻移动频闪。
+/// </summary>
 internal sealed class DwmPortalOverlay : IDisposable
 {
 	private sealed class PortalOverlayManager : Form
 	{
-		private PortalPreviewForm? _frontPreview;
+		private PortalPreviewForm? _preview;
 
-		private PortalPreviewForm? _backPreview;
-
-		private readonly ForegroundZOrderGuard _foregroundGuard = new ForegroundZOrderGuard();
+		private readonly ForegroundZOrderGuard _foregroundGuard = new();
 
 		private readonly System.Windows.Forms.Timer _zOrderGuardTimer;
 
@@ -26,17 +28,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		private bool _portalVisible;
 
-		internal bool PortalVisible
-		{
-			get
-			{
-				if (_portalVisible)
-				{
-					return _frontPreview != null;
-				}
-				return false;
-			}
-		}
+		internal bool PortalVisible => _portalVisible && _preview is not null;
 
 		internal nint SourceWindow { get; private set; }
 
@@ -46,22 +38,25 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		internal PortalOverlayManager()
 		{
-			base.FormBorderStyle = FormBorderStyle.None;
-			base.ShowInTaskbar = false;
-			base.StartPosition = FormStartPosition.Manual;
-			base.Opacity = 0.0;
-			base.Size = new Size(1, 1);
+			FormBorderStyle = FormBorderStyle.None;
+			ShowInTaskbar = false;
+			StartPosition = FormStartPosition.Manual;
+			Opacity = 0;
+			Size = new Size(1, 1);
 			_zOrderGuardTimer = new System.Windows.Forms.Timer
 			{
-				Interval = 10
+				// 不必 10ms 狂刷 Z-order；过频会加重合成抖动
+				Interval = 33
 			};
-			_zOrderGuardTimer.Tick += delegate
-			{
-				_foregroundGuard.EnsurePreserved();
-			};
+			_zOrderGuardTimer.Tick += (_, _) => _foregroundGuard.EnsurePreserved();
 		}
 
-		internal bool TryShowPortal(nint sourceWindow, nint protectedWindow, NativeMethods.Point screenCenter, int radius, out string? error)
+		internal bool TryShowPortal(
+			nint sourceWindow,
+			nint protectedWindow,
+			NativeMethods.Point screenCenter,
+			int radius,
+			out string? error)
 		{
 			HidePortal();
 			SourceWindow = sourceWindow;
@@ -70,25 +65,30 @@ internal sealed class DwmPortalOverlay : IDisposable
 				HidePortal();
 				return false;
 			}
-			_frontPreview = new PortalPreviewForm(radius);
-			_backPreview = new PortalPreviewForm(radius);
-			if (!_frontPreview.TryRegisterSource(sourceWindow, out error) || !_backPreview.TryRegisterSource(sourceWindow, out error))
+
+			_preview = new PortalPreviewForm(radius);
+			if (!_preview.TryRegisterSource(sourceWindow, out error))
 			{
 				HidePortal();
 				return false;
 			}
+
 			if (!NativeMethods.GetWindowRect(SourceWindow, out var rect))
 			{
 				error = "无法读取视觉穿透源窗口的位置。";
 				HidePortal();
 				return false;
 			}
-			if (!_frontPreview.TryPrepare(rect, screenCenter, radius, out error) || !TrySetPreviewVisibility(null, _frontPreview, out error))
+
+			if (!_preview.TryPrepare(rect, screenCenter, radius, moveWindow: true, out error) ||
+			    !TryShowPreview(_preview, out error))
 			{
 				HidePortal();
 				return false;
 			}
-			NativeMethods.DwmFlush();
+
+			// 首帧同步一次即可，移动路径不再每帧 DwmFlush
+			_ = NativeMethods.DwmFlush();
 			_portalVisible = true;
 			_zOrderGuardTimer.Start();
 			_lastScreenCenter = screenCenter;
@@ -97,32 +97,37 @@ internal sealed class DwmPortalOverlay : IDisposable
 			return true;
 		}
 
-		internal bool TryUpdatePortal(NativeMethods.Point screenCenter, int radius, out string? error)
+		internal bool TryUpdatePortal(
+			NativeMethods.Point screenCenter,
+			int radius,
+			out string? error)
 		{
 			_foregroundGuard.UpdatePortalGeometry(screenCenter, radius);
-			_foregroundGuard.EnsurePreserved();
-			if (!_portalVisible || _frontPreview == null || _backPreview == null || !NativeMethods.GetWindowRect(SourceWindow, out var rect))
+
+			if (!_portalVisible || _preview is null ||
+			    !NativeMethods.GetWindowRect(SourceWindow, out var rect))
 			{
 				error = "视觉穿透源窗口已经不可用。";
 				return false;
 			}
-			NativeMethods.Point? lastScreenCenter = _lastScreenCenter;
-			if (lastScreenCenter.HasValue && lastScreenCenter.GetValueOrDefault() == screenCenter && _lastSourceRect == rect)
+
+			// 位置与源窗口矩形未变：跳过（避免无意义 DWM 更新）
+			if (_lastScreenCenter is { } lastCenter &&
+			    lastCenter == screenCenter &&
+			    _lastSourceRect == rect)
 			{
 				error = null;
 				return true;
 			}
-			if (!_backPreview.TryPrepare(rect, screenCenter, radius, out error) || !TrySetPreviewVisibility(_frontPreview, _backPreview, out error))
+
+			// 单缓冲原位更新：不隐藏/显示第二窗，不每帧换帧
+			if (!_preview.TryPrepare(rect, screenCenter, radius, moveWindow: true, out error))
 			{
 				return false;
 			}
-			PortalPreviewForm backPreview = _backPreview;
-			PortalPreviewForm frontPreview = _frontPreview;
-			_frontPreview = backPreview;
-			_backPreview = frontPreview;
+
 			_lastScreenCenter = screenCenter;
 			_lastSourceRect = rect;
-			NativeMethods.DwmFlush();
 			error = null;
 			return true;
 		}
@@ -130,19 +135,18 @@ internal sealed class DwmPortalOverlay : IDisposable
 		internal void HidePortal()
 		{
 			_zOrderGuardTimer.Stop();
-			if (_portalVisible && _frontPreview != null)
+			if (_portalVisible && _preview is not null)
 			{
-				TrySetPreviewVisibility(_frontPreview, null, out _);
+				_ = TryHidePreview(_preview, out _);
 			}
+
 			_portalVisible = false;
-			_frontPreview?.Dispose();
-			_backPreview?.Dispose();
+			_preview?.Dispose();
 			_foregroundGuard.Restore();
-			_frontPreview = null;
-			_backPreview = null;
+			_preview = null;
 			_lastScreenCenter = null;
 			_lastSourceRect = null;
-			SourceWindow = IntPtr.Zero;
+			SourceWindow = nint.Zero;
 		}
 
 		protected override void Dispose(bool disposing)
@@ -152,83 +156,88 @@ internal sealed class DwmPortalOverlay : IDisposable
 			{
 				_zOrderGuardTimer.Dispose();
 			}
+
 			base.Dispose(disposing);
 		}
 
-		private static bool TrySetPreviewVisibility(PortalPreviewForm? previewToHide, PortalPreviewForm? previewToShow, out string? error)
+		private static bool TryShowPreview(PortalPreviewForm preview, out string? error)
 		{
-			nint num = NativeMethods.BeginDeferWindowPos(((previewToHide != null) ? 1 : 0) + ((previewToShow != null) ? 1 : 0));
-			if (num == IntPtr.Zero)
+			// SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER
+			const uint flags = NativeMethods.SwpShowWindow |
+			                   NativeMethods.SwpNoActivate |
+			                   NativeMethods.SwpNoMove |
+			                   NativeMethods.SwpNoSize |
+			                   NativeMethods.SwpNoOwnerZOrder;
+			if (!NativeMethods.SetWindowPos(
+				    preview.Handle,
+				    NativeMethods.HwndTopMost,
+				    0,
+				    0,
+				    0,
+				    0,
+				    flags))
 			{
-				error = LastWin32Error("无法开始视觉圆的原子换帧");
+				error = LastWin32Error("无法显示视觉圆");
 				return false;
 			}
-			uint num2 = 531u;
-			if (previewToHide != null)
+
+			error = null;
+			return true;
+		}
+
+		private static bool TryHidePreview(PortalPreviewForm preview, out string? error)
+		{
+			const uint flags = NativeMethods.SwpHideWindow |
+			                   NativeMethods.SwpNoActivate |
+			                   NativeMethods.SwpNoMove |
+			                   NativeMethods.SwpNoSize |
+			                   NativeMethods.SwpNoOwnerZOrder |
+			                   NativeMethods.SwpNoZOrder;
+			if (!NativeMethods.SetWindowPos(preview.Handle, nint.Zero, 0, 0, 0, 0, flags))
 			{
-				num = NativeMethods.DeferWindowPos(num, previewToHide.Handle, NativeMethods.HwndTopMost, 0, 0, 0, 0, num2 | 0x80);
-				if (num == IntPtr.Zero)
-				{
-					error = LastWin32Error("无法隐藏上一帧视觉圆");
-					return false;
-				}
-			}
-			if (previewToShow != null)
-			{
-				num = NativeMethods.DeferWindowPos(num, previewToShow.Handle, NativeMethods.HwndTopMost, 0, 0, 0, 0, num2 | 0x40);
-				if (num == IntPtr.Zero)
-				{
-					error = LastWin32Error("无法显示下一帧视觉圆");
-					return false;
-				}
-			}
-			if (!NativeMethods.EndDeferWindowPos(num))
-			{
-				error = LastWin32Error("无法提交视觉圆的原子换帧");
+				error = LastWin32Error("无法隐藏视觉圆");
 				return false;
 			}
+
 			error = null;
 			return true;
 		}
 
 		private static string LastWin32Error(string message)
 		{
-			int lastWin32Error = Marshal.GetLastWin32Error();
-			if (lastWin32Error != 0)
-			{
-				return $"{message}：{new Win32Exception(lastWin32Error).Message}（{lastWin32Error}）";
-			}
-			return message;
+			var code = Marshal.GetLastWin32Error();
+			return code != 0
+				? $"{message}：{new Win32Exception(code).Message}（{code}）"
+				: message;
 		}
 	}
 
 	private sealed class PortalPreviewForm : Form
 	{
-		private const int BandHeight = 3;
+		// 4px 条带：比 3px 略减缩略图数量，移动时 DWM 更新更轻
+		private const int BandHeight = 4;
 
-		private const int WsExTransparent = 32;
+		private const int WmNcHitTest = 0x0084;
 
-		private const int WsExToolWindow = 128;
+		private const int WmMouseActivate = 0x0021;
 
-		private const int WsExNoActivate = 134217728;
+		private static readonly nint HtTransparent = new(-1);
 
-		private const int WmNcHitTest = 132;
-
-		private const int WmMouseActivate = 33;
-
-		private static readonly nint HtTransparent = new IntPtr(-1);
-
-		private static readonly nint MaNoActivate = new IntPtr(3);
-
-		private static readonly Color PortalTransparencyColor = Color.FromArgb(255, 1, 0, 255);
+		private static readonly nint MaNoActivate = new(3);
 
 		private readonly int _radius;
 
 		private readonly int _diameter;
 
-		private readonly List<nint> _thumbnails = new List<nint>();
+		private readonly List<nint> _thumbnails = [];
 
 		private bool _thumbnailLayoutConfigured;
+
+		private bool _circularRegionApplied;
+
+		private int _lastX = int.MinValue;
+
+		private int _lastY = int.MinValue;
 
 		protected override bool ShowWithoutActivation => true;
 
@@ -236,8 +245,9 @@ internal sealed class DwmPortalOverlay : IDisposable
 		{
 			get
 			{
-				CreateParams createParams = base.CreateParams;
-				createParams.ExStyle |= 134217888;
+				var createParams = base.CreateParams;
+				// WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST 由 TopMost 等处理
+				createParams.ExStyle |= 0x00000020 | 0x00000080 | 0x08000000;
 				return createParams;
 			}
 		}
@@ -246,96 +256,179 @@ internal sealed class DwmPortalOverlay : IDisposable
 		{
 			_radius = radius;
 			_diameter = checked(radius * 2 + 1);
-			base.FormBorderStyle = FormBorderStyle.None;
-			base.ShowInTaskbar = false;
-			base.StartPosition = FormStartPosition.Manual;
-			base.AutoScaleMode = AutoScaleMode.None;
-			BackColor = PortalTransparencyColor;
-			base.TransparencyKey = PortalTransparencyColor;
-			base.TopMost = true;
-			base.Bounds = new Rectangle(0, 0, _diameter, _diameter);
+			FormBorderStyle = FormBorderStyle.None;
+			ShowInTaskbar = false;
+			StartPosition = FormStartPosition.Manual;
+			AutoScaleMode = AutoScaleMode.None;
+			// 不用 TransparencyKey：色键在移动/重绘时极易整窗闪一下
+			BackColor = Color.Black;
+			TopMost = true;
+			// 先放到屏外，避免创建瞬间闪一下
+			Bounds = new Rectangle(-32000, -32000, _diameter, _diameter);
+		}
+
+		protected override void OnHandleCreated(EventArgs e)
+		{
+			base.OnHandleCreated(e);
+			ApplyCircularRegion();
 		}
 
 		internal bool TryRegisterSource(nint sourceWindow, out string? error)
 		{
-			int num = (_diameter + 3 - 1) / 3;
-			for (int i = 0; i < num; i++)
+			var bandCount = (_diameter + BandHeight - 1) / BandHeight;
+			for (var i = 0; i < bandCount; i++)
 			{
-				nint thumbnail;
-				int num2 = NativeMethods.DwmRegisterThumbnail(base.Handle, sourceWindow, out thumbnail);
-				if (num2 != 0 || thumbnail == IntPtr.Zero)
+				var hr = NativeMethods.DwmRegisterThumbnail(Handle, sourceWindow, out var thumbnail);
+				if (hr != 0 || thumbnail == nint.Zero)
 				{
-					error = $"DwmRegisterThumbnail 失败：0x{num2:X8}。";
+					error = $"DwmRegisterThumbnail 失败：0x{hr:X8}。";
 					UnregisterThumbnails();
 					return false;
 				}
+
 				_thumbnails.Add(thumbnail);
 			}
+
 			error = null;
 			return true;
 		}
 
-		internal bool TryPrepare(NativeMethods.Rect sourceWindowRect, NativeMethods.Point screenCenter, int radius, out string? error)
+		/// <param name="moveWindow">
+		/// 是否移动预览窗。首次显示与光标移动都需要为 true。
+		/// </param>
+		internal bool TryPrepare(
+			NativeMethods.Rect sourceWindowRect,
+			NativeMethods.Point screenCenter,
+			int radius,
+			bool moveWindow,
+			out string? error)
 		{
 			if (_thumbnails.Count == 0)
 			{
 				error = "DWM 圆形缩略图尚未注册。";
 				return false;
 			}
-			int x = screenCenter.X - radius;
-			int num = screenCenter.Y - radius;
-			base.Bounds = new Rectangle(x, num, _diameter, _diameter);
-			for (int i = 0; i < _thumbnails.Count; i++)
+
+			ApplyCircularRegion();
+
+			var left = screenCenter.X - radius;
+			var top = screenCenter.Y - radius;
+
+			// 先更新 DWM 源矩形（内容对齐新圆心），再移动窗口，减少“错位一帧”
+			for (var i = 0; i < _thumbnails.Count; i++)
 			{
-				PortalBandGeometry portalBandGeometry = CreateBandGeometry(i);
-				int num2 = screenCenter.X - portalBandGeometry.HalfWidth;
-				int num3 = num + portalBandGeometry.LocalTop;
-				int num4 = _radius - portalBandGeometry.HalfWidth;
-				NativeMethods.DwmThumbnailProperties properties = new NativeMethods.DwmThumbnailProperties
+				var band = CreateBandGeometry(i);
+				var sourceLeft = screenCenter.X - band.HalfWidth;
+				var sourceTop = top + band.LocalTop;
+				var destLeft = _radius - band.HalfWidth;
+
+				// 首次：写全套属性；之后移动：只改 Source（Destination 在客户区固定）
+				var flags = _thumbnailLayoutConfigured
+					? NativeMethods.DwmTnpRectSource
+					: NativeMethods.DwmTnpRectDestination |
+					  NativeMethods.DwmTnpRectSource |
+					  NativeMethods.DwmTnpOpacity |
+					  NativeMethods.DwmTnpVisible |
+					  NativeMethods.DwmTnpSourceClientAreaOnly;
+
+				var properties = new NativeMethods.DwmThumbnailProperties
 				{
-					Flags = (_thumbnailLayoutConfigured ? 2u : 31u),
-					Destination = new NativeMethods.Rect(num4, portalBandGeometry.LocalTop, num4 + portalBandGeometry.Width, portalBandGeometry.LocalTop + portalBandGeometry.Height),
-					Source = new NativeMethods.Rect(num2 - sourceWindowRect.Left, num3 - sourceWindowRect.Top, num2 - sourceWindowRect.Left + portalBandGeometry.Width, num3 - sourceWindowRect.Top + portalBandGeometry.Height),
+					Flags = flags,
+					Destination = new NativeMethods.Rect(
+						destLeft,
+						band.LocalTop,
+						destLeft + band.Width,
+						band.LocalTop + band.Height),
+					Source = new NativeMethods.Rect(
+						sourceLeft - sourceWindowRect.Left,
+						sourceTop - sourceWindowRect.Top,
+						sourceLeft - sourceWindowRect.Left + band.Width,
+						sourceTop - sourceWindowRect.Top + band.Height),
 					Opacity = byte.MaxValue,
 					Visible = true,
 					SourceClientAreaOnly = false
 				};
-				int num5 = NativeMethods.DwmUpdateThumbnailProperties(_thumbnails[i], ref properties);
-				if (num5 != 0)
+
+				var hr = NativeMethods.DwmUpdateThumbnailProperties(_thumbnails[i], ref properties);
+				if (hr != 0)
 				{
-					error = $"DwmUpdateThumbnailProperties 失败：0x{num5:X8}。";
+					error = $"DwmUpdateThumbnailProperties 失败：0x{hr:X8}。";
 					return false;
 				}
 			}
+
 			_thumbnailLayoutConfigured = true;
+
+			if (moveWindow && (_lastX != left || _lastY != top))
+			{
+				// 原位移动：不改 Z、不激活、不改尺寸，避免 Defer 显隐换帧
+				const uint moveFlags =
+					NativeMethods.SwpNoSize |
+					NativeMethods.SwpNoZOrder |
+					NativeMethods.SwpNoActivate |
+					NativeMethods.SwpNoOwnerZOrder;
+				if (!NativeMethods.SetWindowPos(Handle, nint.Zero, left, top, 0, 0, moveFlags))
+				{
+					error = "无法移动视觉圆：" + new Win32Exception(Marshal.GetLastWin32Error()).Message;
+					return false;
+				}
+
+				_lastX = left;
+				_lastY = top;
+			}
+
 			error = null;
 			return true;
 		}
 
+		private void ApplyCircularRegion()
+		{
+			if (_circularRegionApplied || !IsHandleCreated)
+			{
+				return;
+			}
+
+			// CreateEllipticRgn 右/下边界是开区间
+			var region = NativeMethods.CreateEllipticRgn(0, 0, _diameter, _diameter);
+			if (region == nint.Zero)
+			{
+				return;
+			}
+
+			// 成功时系统接管 region；失败则自行删除
+			if (NativeMethods.SetWindowRgn(Handle, region, true) == 0)
+			{
+				_ = NativeMethods.DeleteObject(region);
+				return;
+			}
+
+			_circularRegionApplied = true;
+		}
+
 		private PortalBandGeometry CreateBandGeometry(int index)
 		{
-			int num = index * 3;
-			int num2 = Math.Min(3, _diameter - num);
-			double num3 = (double)num + (double)num2 / 2.0 - (double)_radius;
-			double d = Math.Max(0.0, (double)(_radius * _radius) - num3 * num3);
-			int halfWidth = Math.Max(1, (int)Math.Floor(Math.Sqrt(d)));
-			return new PortalBandGeometry(num, num2, halfWidth);
+			var localTop = index * BandHeight;
+			var height = Math.Min(BandHeight, _diameter - localTop);
+			var midY = localTop + height / 2.0 - _radius;
+			var halfWidth = Math.Max(1, (int)Math.Floor(Math.Sqrt(Math.Max(0.0, (_radius * _radius) - midY * midY))));
+			return new PortalBandGeometry(localTop, height, halfWidth);
 		}
 
 		protected override void WndProc(ref Message message)
 		{
-			if (message.Msg == 132)
+			if (message.Msg == WmNcHitTest)
 			{
 				message.Result = HtTransparent;
+				return;
 			}
-			else if (message.Msg == 33)
+
+			if (message.Msg == WmMouseActivate)
 			{
 				message.Result = MaNoActivate;
+				return;
 			}
-			else
-			{
-				base.WndProc(ref message);
-			}
+
+			base.WndProc(ref message);
 		}
 
 		protected override void Dispose(bool disposing)
@@ -347,11 +440,13 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		private void UnregisterThumbnails()
 		{
-			foreach (nint thumbnail in _thumbnails)
+			foreach (var thumbnail in _thumbnails)
 			{
-				NativeMethods.DwmUnregisterThumbnail(thumbnail);
+				_ = NativeMethods.DwmUnregisterThumbnail(thumbnail);
 			}
+
 			_thumbnails.Clear();
+			_thumbnailLayoutConfigured = false;
 		}
 	}
 
@@ -364,7 +459,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 	private readonly Thread _thread;
 
-	private readonly ManualResetEventSlim _ready = new ManualResetEventSlim(initialState: false);
+	private readonly ManualResetEventSlim _ready = new(initialState: false);
 
 	private PortalOverlayManager? _manager;
 
@@ -374,13 +469,13 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 	private bool _disposed;
 
-	internal bool IsVisible => Invoke((PortalOverlayManager manager) => manager.PortalVisible);
+	internal bool IsVisible => Invoke(static manager => manager.PortalVisible);
 
-	internal nint SourceWindow => Invoke((PortalOverlayManager manager) => manager.SourceWindow);
+	internal nint SourceWindow => Invoke(static manager => manager.SourceWindow);
 
-	internal int ForegroundRecoveryCount => Invoke((PortalOverlayManager manager) => manager.ForegroundRecoveryCount);
+	internal int ForegroundRecoveryCount => Invoke(static manager => manager.ForegroundRecoveryCount);
 
-	internal int BackgroundPromotionCount => Invoke((PortalOverlayManager manager) => manager.BackgroundPromotionCount);
+	internal int BackgroundPromotionCount => Invoke(static manager => manager.BackgroundPromotionCount);
 
 	internal DwmPortalOverlay(int radius)
 	{
@@ -393,7 +488,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 		_thread.SetApartmentState(ApartmentState.STA);
 		_thread.Start();
 		_ready.Wait();
-		if (_startupException != null)
+		if (_startupException is not null)
 		{
 			throw new InvalidOperationException("无法启动视觉穿透覆盖层。", _startupException);
 		}
@@ -401,16 +496,20 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 	internal bool TryShow(nint sourceWindow, nint protectedWindow, NativeMethods.Point screenCenter, out string? error)
 	{
-		if (sourceWindow == IntPtr.Zero || !NativeMethods.IsWindow(sourceWindow))
+		if (sourceWindow == nint.Zero || !NativeMethods.IsWindow(sourceWindow))
 		{
 			error = "圆洞下方没有可用于视觉预览的窗口。";
 			return false;
 		}
+
 		try
 		{
-			(bool Success, string? Detail) tuple = Invoke((PortalOverlayManager manager) => (!manager.TryShowPortal(sourceWindow, protectedWindow, screenCenter, _radius, out string? error2)) ? (Success: false, Detail: error2) : (Success: true, Detail: null));
-			error = tuple.Item2;
-			return tuple.Item1;
+			var result = Invoke(manager =>
+				manager.TryShowPortal(sourceWindow, protectedWindow, screenCenter, _radius, out var detail)
+					? (true, detail)
+					: (false, detail));
+			error = result.Item2;
+			return result.Item1;
 		}
 		catch (Exception ex)
 		{
@@ -423,9 +522,12 @@ internal sealed class DwmPortalOverlay : IDisposable
 	{
 		try
 		{
-			(bool Success, string? Detail) tuple = Invoke((PortalOverlayManager manager) => (!manager.TryUpdatePortal(screenCenter, _radius, out string? error2)) ? (Success: false, Detail: error2) : (Success: true, Detail: null));
-			error = tuple.Item2;
-			return tuple.Item1;
+			var result = Invoke(manager =>
+				manager.TryUpdatePortal(screenCenter, _radius, out var detail)
+					? (true, detail)
+					: (false, detail));
+			error = result.Item2;
+			return result.Item1;
 		}
 		catch (Exception ex)
 		{
@@ -436,13 +538,14 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 	internal void Hide()
 	{
-		if (_disposed || _manager == null)
+		if (_disposed || _manager is null)
 		{
 			return;
 		}
+
 		try
 		{
-			Invoke(delegate(PortalOverlayManager manager)
+			_ = Invoke(manager =>
 			{
 				manager.HidePortal();
 				return true;
@@ -450,6 +553,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 		}
 		catch
 		{
+			// 关闭路径忽略
 		}
 	}
 
@@ -459,62 +563,61 @@ internal sealed class DwmPortalOverlay : IDisposable
 		{
 			return;
 		}
-		Hide();
+
 		_disposed = true;
-		if (_manager != null && _applicationContext != null)
+		try
 		{
-			try
+			Hide();
+			_ = Invoke(manager =>
 			{
-				_manager.BeginInvoke(delegate
-				{
-					_applicationContext.ExitThread();
-				});
-			}
-			catch
-			{
-			}
+				manager.Close();
+				return true;
+			});
 		}
-		if (_thread.IsAlive && Thread.CurrentThread != _thread)
+		catch
 		{
-			_thread.Join(TimeSpan.FromSeconds(2.0));
+			// ignore
 		}
+
+		if (!_thread.Join(2000))
+		{
+			// best-effort
+		}
+
 		_ready.Dispose();
 		GC.SuppressFinalize(this);
-	}
-
-	private T Invoke<T>(Func<PortalOverlayManager, T> operation)
-	{
-		ObjectDisposedException.ThrowIf(_disposed, this);
-		PortalOverlayManager portalOverlayManager = _manager ?? throw new InvalidOperationException("视觉穿透覆盖层尚未就绪。");
-		if (portalOverlayManager.InvokeRequired)
-		{
-			return (T)portalOverlayManager.Invoke(operation, portalOverlayManager);
-		}
-		return operation(portalOverlayManager);
 	}
 
 	private void RunMessageLoop()
 	{
 		try
 		{
-			Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-			_applicationContext = new ApplicationContext();
 			_manager = new PortalOverlayManager();
-			_ = _manager.Handle;
+			_applicationContext = new ApplicationContext(_manager);
 			_ready.Set();
 			Application.Run(_applicationContext);
 		}
-		catch (Exception startupException)
+		catch (Exception ex)
 		{
-			_startupException = startupException;
+			_startupException = ex;
 			_ready.Set();
 		}
-		finally
+	}
+
+	private T Invoke<T>(Func<PortalOverlayManager, T> action)
+	{
+		ObjectDisposedException.ThrowIf(_disposed, this);
+		var manager = _manager ?? throw new InvalidOperationException("视觉穿透覆盖层尚未就绪。");
+		if (manager.IsDisposed)
 		{
-			_manager?.Dispose();
-			_manager = null;
-			_applicationContext?.Dispose();
-			_applicationContext = null;
+			throw new ObjectDisposedException(nameof(PortalOverlayManager));
 		}
+
+		if (manager.InvokeRequired)
+		{
+			return (T)manager.Invoke(action, manager)!;
+		}
+
+		return action(manager);
 	}
 }
