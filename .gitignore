@@ -13,6 +13,9 @@ TestResults/
 .tools/
 recovered/
 
+# Private planning, research, and design drafts (not for the public repo)
+private/
+
 # Local diagnostics and desktop captures
 diagnostics/
 screenshots/

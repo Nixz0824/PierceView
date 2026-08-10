@@ -1,8 +1,18 @@
 # 参与寸镜 / Contributing to PierceView
 
-感谢你帮助寸镜变得更稳定。1.0 已冻结为 V6 单层圆形版本：欢迎提交缺陷、兼容性报告、文档改进和测试补充；多层、矩形与羽化功能请按路线图讨论，不会直接加入 1.0。
+感谢你帮助寸镜变得更稳定。欢迎提交缺陷、兼容性报告、文档改进和测试补充。1.0 定位为轻量托盘小工具与单层圆形透视；请保持范围克制，避免把无关平台能力塞进本版本。
 
-Thank you for helping PierceView become more reliable. Version 1.0 is frozen on the V6 single-layer circular core. Bug reports, compatibility findings, documentation improvements, and tests are welcome. Multi-layer, rectangular, and feathered portals follow the roadmap and will not be added directly to 1.0.
+Thank you for helping PierceView become more reliable. Bug reports, compatibility findings, documentation improvements, and tests are welcome. Version 1.0 is a lightweight tray utility with a single-layer circular portal—please keep the scope tight and avoid unrelated platform features.
+
+## 许可与贡献 / License & contributions
+
+本仓库采用 [PolyForm Noncommercial License 1.0.0](LICENSE)，**禁止商业用途**。提交代码或文档即表示：
+
+This repository uses the [PolyForm Noncommercial License 1.0.0](LICENSE) (**noncommercial only**). By submitting code or documentation, you confirm that:
+
+1. 你有权提交这些内容。You have the right to submit the material.
+2. 你同意贡献内容在相同许可条款下成为本项目的一部分。You license your contribution under the same terms as this project.
+3. 你不会通过贡献引入需要商业授权或与本许可冲突的依赖。You will not introduce dependencies that require commercial licensing or conflict with these terms.
 
 ## 报告问题 / Report an issue
 
@@ -35,9 +45,8 @@ pwsh -File .\tests\tray-smoke-test.ps1
 ## 提交原则 / Pull request principles
 
 - 保持托盘小工具定位，不引入账号、云服务、复杂前后端或无关依赖。Keep the tray-utility scope; do not add accounts, cloud services, complex frontends/backends, or unrelated dependencies.
-- 1.0.x 只接受稳定性、兼容性、恢复、文案与发布工程改进。Version 1.0.x accepts only stability, compatibility, restore, copy, and release-engineering improvements.
+- 1.0.x 优先接受稳定性、兼容性、恢复、文案与发布工程改进。Version 1.0.x prefers stability, compatibility, restore, copy, and release-engineering improvements.
 - 不绕过 DRM、UAC、反作弊或其他保护机制。Do not bypass DRM, UAC, anti-cheat, or other protection mechanisms.
 - 用户可见文案和仓库主页素材保持简体中文与 English 对照。Keep user-facing copy and repository-homepage assets bilingual in Simplified Chinese and English.
-- 更新行为时同步更新测试、CHANGELOG 与相关文档。Update tests, CHANGELOG, and related documentation when behavior changes.
-
-提交即表示你有权贡献其中内容；正式许可条款将在仓库加入 `LICENSE` 后确定。By contributing, you confirm that you have the right to submit the material. Formal contribution licensing will be defined when the repository adds a `LICENSE` file.
+- 更新行为时同步更新测试、CHANGELOG 与相关公开文档。Update tests, CHANGELOG, and related public documentation when behavior changes.
+- 不要把内部规划、未公开路线或私人桌面材料提交进仓库。Do not commit internal planning notes, unpublished roadmaps, or private desktop material.

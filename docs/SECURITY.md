@@ -48,7 +48,7 @@ Include the affected version and SHA256, Windows version, minimal conditions, po
 
 ## 发布安全门槛
 
-- 每个候选包运行静态能力审计。
+- 每个发布包运行静态能力审计。
 - 对最终发布 EXE 记录 SHA256。
 - 正式公开发布前建议完成 Authenticode 签名和 Defender 扫描。
 - 任何安全软件或反作弊误报都应先停止分发、保留样本和版本哈希，再与厂商核实；不得指导用户绕过检测。

@@ -9,10 +9,10 @@
     <AssemblyName>PierceView</AssemblyName>
     <RootNamespace>WindowPortal</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.0.0-rc.1</Version>
+    <Version>1.0.0</Version>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
-    <InformationalVersion>1.0.0-rc.1</InformationalVersion>
+    <InformationalVersion>1.0.0</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>寸镜 / PierceView</Product>
     <Company>PierceView Project</Company>
@@ -21,7 +21,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="..\..\assets\brand\ql-eye-logo-concept-v5-content-continuity-bw.png"
+    <EmbeddedResource Include="..\..\assets\brand\pierceview-logo.png"
                       LogicalName="PierceView.Logo.png" />
   </ItemGroup>
 </Project>
