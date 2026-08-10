@@ -49,7 +49,7 @@ Version 1.0 uses a single-layer circular core. Each F8 session keeps one visual 
 
 The current build is not Authenticode-signed, so Windows may show “Unknown publisher.” That means Windows cannot verify the publisher via a certificate—it does **not** mean the app lacks a product name or icon. Download only from this repository’s [Releases](../../releases) and verify the SHA256 above; do not run a copy whose origin is uncertain.
 
-产品介绍页 / Product site：见仓库 `landing/`（GitHub Pages 部署后可在线体验）。
+产品介绍页 / Product site：<https://nixz0824.github.io/PierceView/>（源码在 `landing/`）。
 
 ## 快速开始 / Quick start
 
