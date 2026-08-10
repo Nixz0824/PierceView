@@ -8,16 +8,25 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 ### Documentation
 
-- 公开仓库整理为用户向首页：保留产品插画与双语说明，移除内部规划、调研与验收类文档链接。
-- Public homepage cleanup: keep product illustrations and bilingual copy; remove internal planning, research, and acceptance-doc links.
-- 采用 PolyForm Noncommercial 1.0.0（非商业许可）；品牌资源收敛为最终 Logo。
-- Adopt PolyForm Noncommercial 1.0.0; keep only the final logo in the public tree.
+- （暂无）
 
 ## [1.0.0] - 2026-08-10
 
 首个公开版本。单层圆形透视托盘工具，可直接下载使用。
 
 First public release. A single-layer circular portal tray utility ready to download and use.
+
+### Packaging
+
+- 正式发布包命名为 `PierceView-v1.0.0-win-x64.zip`（不再使用 `rc` 后缀）。
+- Official package name is `PierceView-v1.0.0-win-x64.zip` (no `rc` suffix).
+- 新增互动介绍页 `landing/`（按住 F8 演示透视与图片拖放）。
+- Added interactive product site under `landing/`.
+
+### Documentation
+
+- 公开仓库整理为用户向首页；采用 PolyForm Noncommercial 1.0.0；品牌收敛为最终 Logo。
+- Public-facing README cleanup; PolyForm Noncommercial 1.0.0; final logo only.
 
 ### Features
 
@@ -45,11 +54,6 @@ First public release. A single-layer circular portal tray utility ready to downl
 - Some no-redirection, protected, or special GPU surfaces may accept clicks without a visual.
 - 发布包尚未 Authenticode 签名；Windows 可能提示“未知发布者”。
 - Builds are not Authenticode-signed; Windows may show “Unknown publisher.”
-
-### Notes on packaging
-
-- GitHub Release 资源若仍使用历史文件名 `PierceView-v1.0.0-rc.1-win-x64.zip` / 标签 `v1.0.0-rc.1`，以 README 中的 SHA256 与产品版本 `1.0.0` 为准。
-- If Release assets still use the historical `v1.0.0-rc.1` filename/tag, trust the README SHA256 values and product version `1.0.0`.
 
 ## Earlier pre-release history
 

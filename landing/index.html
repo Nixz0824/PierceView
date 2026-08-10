@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="寸镜 PierceView：按住 F8 透视、选中、点击、滚动后方窗口；图片可拖回当前应用。" />
+  <meta name="theme-color" content="#1a1916" />
+  <title>寸镜 / PierceView</title>
+  <link rel="icon" href="assets/pierceview-logo.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <!-- 与舞台内容共用同一水平边距，保证左右对齐 -->
+  <div class="page-shell" id="pageShell">
+    <header class="topbar" id="topbar">
+      <a class="brand" href="#top">
+        <img src="assets/pierceview-logo.png" width="28" height="28" alt="" />
+        <span class="brand-cn">寸镜</span>
+        <span class="brand-en">PierceView</span>
+      </a>
+      <div class="topbar-actions">
+        <button type="button" class="btn btn-share" id="btnShare" aria-label="分享">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+            <path d="M12 4v11" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+            <path d="M8 8l4-4 4 4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>分享</span>
+        </button>
+        <a class="btn btn-gh" id="btnNavGithub" href="https://github.com/Nixz0824/PierceView" target="_blank" rel="noopener noreferrer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 2C6.48 2 2 6.58 2 12.26c0 4.52 2.87 8.35 6.84 9.7.5.1.68-.22.68-.48 0-.24-.01-.87-.01-1.7-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.86.09-.67.35-1.12.63-1.38-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.32.1-2.75 0 0 .84-.28 2.75 1.05A9.3 9.3 0 0 1 12 7.5c.85 0 1.71.12 2.51.35 1.9-1.33 2.74-1.05 2.74-1.05.55 1.43.2 2.49.1 2.75.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.8-4.57 5.06.36.32.68.94.68 1.9 0 1.38-.01 2.49-.01 2.83 0 .26.18.59.69.48A10.05 10.05 0 0 0 22 12.26C22 6.58 17.52 2 12 2Z"/>
+          </svg>
+          <span>GitHub</span>
+        </a>
+      </div>
+    </header>
+  </div>
+
+  <main id="top">
+    <section class="reel" id="reel" aria-label="寸镜产品体验">
+      <div class="reel-track">
+        <div class="reel-pin">
+          <div class="stage" id="stage" tabindex="0"
+            aria-label="按住 F8 开启透视。圆内可观察、选中文字、点击与滚动后方页面；图片可拖到投放区，松开 F8 投放。">
+
+            <!-- -1：可滚动、可点击、可选中的参考页；仅图片可拖放 -->
+            <div class="layer back" id="layerBack">
+              <div class="webdoc" id="backShell">
+                <header class="webdoc-bar">
+                  <span class="webdoc-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <span class="webdoc-url">notes.local / 参考页</span>
+                </header>
+                <div class="webdoc-scroll" id="backScroll">
+                  <article class="webdoc-article">
+                    <h2 class="sel">春日行程草案</h2>
+                    <p class="lead sel">这份页面用于演示：在透视圆内可以阅读、选中文字、点击按钮，并滚动查看更长内容。</p>
+                    <p class="sel en">A calm reference page. Inside the portal you can read, select text, click, and scroll.</p>
+
+                    <div class="btn-row">
+                      <button type="button" class="web-btn" data-click="saved">收藏本页</button>
+                      <button type="button" class="web-btn ghost" data-click="copied">复制标题</button>
+                    </div>
+                    <p class="click-feedback" id="clickFeedback" hidden aria-live="polite"></p>
+
+                    <h3 class="sel">上午</h3>
+                    <p class="sel">09:30 公园散步，记录光线与配色。带上水杯和相机，避免中午人流高峰。</p>
+                    <p class="sel en">09:30 Walk in the park. Note light and color. Bring water and a camera.</p>
+
+                    <figure class="web-fig" data-drag-image tabindex="0" title="按住拖到前方投放区">
+                      <img src="assets/ref-note.svg" alt="可拖出的参考图" width="800" height="480" draggable="false" />
+                      <figcaption class="sel">参考图 · 仅此图可拖入当前应用</figcaption>
+                    </figure>
+
+                    <h3 class="sel">下午</h3>
+                    <p class="sel">14:00 咖啡馆整理笔记：列出三件今日必做事项，并导出一张配图备用。</p>
+                    <ul class="sel-list">
+                      <li class="sel">写一段产品说明（中英各两句）</li>
+                      <li class="sel">检查下载页链接是否可打开</li>
+                      <li class="sel">导出配图并命名为 cover.png</li>
+                    </ul>
+
+                    <h3 class="sel">材料清单</h3>
+                    <p class="sel">笔记本、充电线、耳机、墨镜。若下雨则改为室内画廊路线。</p>
+                    <p class="sel en">Notebook, cable, headphones, sunglasses. If rain: indoor gallery route.</p>
+
+                    <blockquote class="sel">
+                      小提示：选中任意文字可以复制；向下滚动可看更多段落。图片按住拖到前方投放区，松开 F8 完成投放。
+                    </blockquote>
+
+                    <h3 class="sel">晚间</h3>
+                    <p class="sel">19:30 简单复盘：今天最顺手的交互是哪一步？把感受写进备忘录即可。</p>
+                    <p class="sel">20:15 休息，不安排新任务。</p>
+
+                    <div class="webdoc-end sel">— 页面结束 · End of page —</div>
+                  </article>
+                </div>
+              </div>
+            </div>
+
+            <!-- 前台 -->
+            <div class="layer front" id="layerFront">
+              <div class="front-center">
+                <p class="front-q">按住 F8，直接试一次</p>
+                <p class="front-q-en">Hold F8 and try it now</p>
+                <p class="front-tip">圆内：观察 · 选中 · 点击 · 滚动 · 拖图片投放</p>
+                <div class="dropzone" id="dropzone">
+                  <span class="dz-idle" id="dzIdle">图片投放区 · Image drop zone</span>
+                  <div class="dz-body" id="dzBody" hidden></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="portal" id="portal" hidden>
+              <div class="portal-view">
+                <div class="portal-scroll" id="portalScroll"></div>
+              </div>
+            </div>
+            <div class="ghost" id="ghost" hidden></div>
+
+            <!-- 左右纯文字落在两侧中下部；与顶栏左右边缘对齐 -->
+            <div class="stage-chrome">
+              <div class="side-text side-text-cn scene-a">
+                <p class="tag">Windows 托盘工具</p>
+                <h1>按住 F8<br />看穿 · 操作 · 带回</h1>
+                <p class="desc">圆内观察、选中、点击并滚动后方页面。需要时把<strong>图片</strong>拖到当前窗，<strong>松开 F8</strong> 投放。</p>
+                <p class="hint"><kbd>F8</kbd> / <kbd>空格</kbd> 按住开启 · 松手圆洞消失</p>
+                <a class="text-link" href="https://github.com/Nixz0824/PierceView/releases" target="_blank" rel="noopener noreferrer" id="btnDownload">下载 Release →</a>
+              </div>
+
+              <div class="side-text side-text-en scene-a">
+                <p class="tag">Windows tray utility</p>
+                <h1>Hold F8<br />See · Act · Bring back</h1>
+                <p class="desc">View, select, click, and scroll the page behind. Drag an <strong>image</strong> to the drop zone, then <strong>release F8</strong>.</p>
+                <p class="hint"><kbd>F8</kbd> / <kbd>Space</kbd> hold to open · release to close</p>
+                <a class="text-link" href="https://github.com/Nixz0824/PierceView/releases" target="_blank" rel="noopener noreferrer" data-github>Download Release →</a>
+              </div>
+
+              <div class="points-layer scene-b" id="pointsLayer" aria-hidden="true">
+                <div class="points">
+                  <article class="point">
+                    <h2>真实指针</h2>
+                    <p class="cn">圆内滚动、点击、选中，不是截图预览。</p>
+                    <p class="en">Real input inside the portal.</p>
+                  </article>
+                  <article class="point accent">
+                    <h2>图片拖回当前窗</h2>
+                    <p class="cn">在圆内按住图片拖出 → 移到投放区 → <strong>松开 F8</strong>。</p>
+                    <p class="en">Drag an image, then <strong>release F8</strong> to drop.</p>
+                  </article>
+                  <article class="point">
+                    <h2>单层 · 托盘 · 本地</h2>
+                    <p class="cn">只锁后方一层。无账号云、不注入。游戏前请退出。</p>
+                    <p class="en">One layer. Local. Exit before games.</p>
+                  </article>
+                </div>
+              </div>
+            </div>
+
+            <p class="scroll-hint" id="scrollHint">向下滚动 · Scroll</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="endstrip" id="end">
+      <div class="end-inner">
+        <div class="end-row">
+          <form class="note-strip" id="noteForm">
+            <label class="sr-only" for="noteBody">留言</label>
+            <input id="noteName" type="text" maxlength="20" placeholder="昵称" autocomplete="nickname" />
+            <input id="noteBody" type="text" maxlength="120" required placeholder="一句话留言…" />
+            <button type="submit" class="btn btn-send">发送</button>
+          </form>
+          <div class="stats" id="stats" aria-label="计数">
+            <span><b class="tabular" data-stat="views">—</b> 浏览</span>
+            <span><b class="tabular" data-stat="shares">—</b> 分享</span>
+            <span><b class="tabular" data-stat="github">—</b> GitHub</span>
+          </div>
+        </div>
+        <div class="end-meta">
+          <span>© 2026 Nixz0824 · PolyForm Noncommercial · Win10/11 x64</span>
+          <span id="statsStatus" class="muted"></span>
+          <span class="end-links">
+            <a href="https://github.com/Nixz0824/PierceView" target="_blank" rel="noopener noreferrer" data-github>GitHub</a>
+            <a href="https://github.com/Nixz0824/PierceView/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">许可</a>
+            <a href="https://github.com/Nixz0824/PierceView/blob/main/docs/SECURITY.md" target="_blank" rel="noopener noreferrer">安全</a>
+          </span>
+        </div>
+        <ul class="note-rail" id="noteList" aria-live="polite"></ul>
+      </div>
+    </footer>
+  </main>
+
+  <div class="toast" id="toast" hidden role="status"></div>
+  <script src="app.js" defer></script>
+</body>
+</html>
