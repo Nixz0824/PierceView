@@ -19,7 +19,8 @@ Architecture notes for the public **1.0** single-layer circular portal. This pag
   │  subtract a circle from the host window region
   └─ DwmPortalOverlay：复制固定的后方一层来源
        copy the fixed one-layer-behind source
-       ├─ 两个预览窗口交替提交 / double-buffered preview windows
+       ├─ 单预览窗原位更新（SetWindowRgn 圆形裁剪，移动时不换帧）
+       │  single preview, in-place move; circular SetWindowRgn; no frame swap
        ├─ NonActivatingWindowGuard：临时 WS_EX_NOACTIVATE
        └─ ForegroundZOrderGuard：WinEvent 恢复宿主前台
 ```
@@ -36,7 +37,7 @@ On normal launch, `Program` creates a single-instance mutex and `PierceViewAppli
 2. 在宿主 region 中减去圆后，`WindowFromPoint` 得到该位置当前暴露的后方一层顶层窗口。After subtracting the circle, resolve the one top-level window now exposed behind the host.
 3. 本次 F8 会话固定使用这个来源，不枚举或切换更深窗口。That source stays fixed for the hold session; deeper windows are not scanned or switched to.
 4. `DwmPortalOverlay` 用 DWM thumbnail 把来源窗口对应区域画到圆形预览窗。DWM thumbnails paint the matching source region into the circular preview.
-5. 为近似圆边缘，按水平条带注册缩略图，并在前后两个预览窗之间换帧，减轻撕裂。Horizontal strip thumbnails approximate the circle; two preview windows swap frames to reduce tearing.
+5. 为近似圆边缘，按水平条带注册 DWM 缩略图；预览窗用 `SetWindowRgn` 裁成圆，移动时只改 Source 矩形并 `SetWindowPos` 原位移动（1.0.1 起不再双窗换帧，避免移动频闪）。Horizontal DWM strip thumbnails approximate the circle; the preview uses `SetWindowRgn` and in-place `SetWindowPos` (from 1.0.1: no dual-window frame swap while moving).
 6. 松开 F8 时先隐藏预览，再恢复宿主 region 和来源扩展样式。On release, hide the preview, then restore the host region and source extended styles.
 
 ## 交互与前台保护 / Input and foreground protection
@@ -61,6 +62,6 @@ Release, pause, settings-driven restart, tray exit, and normal process exit shar
 
 ## 已知技术边界 / Technical boundaries
 
-条带近似圆是 1.0 稳定实现的有意选择，边缘仍可能有轻微阶梯。双预览窗降低撕裂，但无法从原理上保证所有 GPU/驱动组合都没有偶发黑帧。更激进的合成方式不在本页承诺范围内。
+条带近似圆是 1.0 稳定实现的有意选择，边缘仍可能有轻微阶梯。1.0.1 用单缓冲原位更新减轻移动频闪，但仍无法从原理上保证所有 GPU/驱动/来源窗口组合都没有偶发黑帧。更激进的合成方式不在本页承诺范围内。
 
-Strip-based circular approximation is an intentional 1.0 stability choice; mild edge stair-stepping can remain. Double buffering reduces tearing but cannot guarantee zero black frames on every GPU/driver pair. More aggressive compositing approaches are outside this document’s promises.
+Strip-based circular approximation is an intentional 1.0 stability choice; mild edge stair-stepping can remain. 1.0.1 uses in-place single-buffer updates to reduce move flicker, but cannot guarantee zero black frames on every GPU/driver/source-window pair. More aggressive compositing approaches are outside this document’s promises.
