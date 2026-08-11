@@ -10,6 +10,41 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 - （暂无）
 
+## [2.1.0] - 2026-08-11
+
+### CPU Edition / CPU 版本
+
+- 将用户验证通过的 `2.1.0-cpu-alpha.4` 固化为正式 CPU 版本；不要求独立显卡，保持轻量、免安装的 Windows 托盘工具形态。
+- Promote the user-validated `2.1.0-cpu-alpha.4` build to the final CPU Edition. It requires no discrete GPU and remains a lightweight, portable Windows tray utility.
+
+### Added
+
+- 新增可调羽化的圆形和自动圆角矩形透视；羽化设为 0 时可使用硬边外观，静止鼠标时后台动态内容也会持续刷新。
+- Add adjustable feathering for circles and automatically rounded rectangles, with a hard-edge option at zero feathering and continuous background refresh while the pointer is still.
+
+### Fixed
+
+- F8 会话期间固定用户可见分层显示窗，只重映射屏外 DWM 捕获来源，修复移动路径上的透视窗闪现、内部旧帧与整体抖动。
+- Pin the user-visible layered surface for the full F8 session and remap only the off-screen DWM capture source, fixing portal flashes along the movement path, stale internal frames, and whole-surface jitter.
+- 每轮只提交一张最终画面，并以约 120Hz 为 CPU 抓取目标，提升高刷新率屏幕上的移动稳定性。
+- Present one final frame per update and target roughly 120Hz CPU capture for steadier motion on high-refresh displays.
+- 使用 32 像素物理交互孔与 16 像素锚定阈值，使后台点击、滚轮和拖放保持可用，同时避免滚轮同时控制前台页面。
+- Use a 32 px physical input aperture with a 16 px anchoring threshold, preserving background click, wheel, and drag behavior while preventing the foreground page from scrolling at the same time.
+- 维持宿主窗口前台与原有 Z-order，并在 F8 会话结束后恢复临时窗口样式。
+- Preserve the host foreground and existing Z-order, then restore temporary window styles when the F8 session ends.
+
+### Verified
+
+- 自检 `19/19`；真实鼠标/Hover 坐标异常 `0/384`；独立窗口回归确认后台滚轮 `Wheel=120`、前台滚轮 `Wheel=0`，后台点击、前台保持、Z-order 与样式恢复均通过。
+- Self-tests `19/19`; real-pointer/hover alignment `0/384` mismatches; independent-window regression confirms background `Wheel=120`, foreground `Wheel=0`, with background click delivery, foreground preservation, Z-order, and style restoration all passing.
+- Microsoft Defender 扫描为 0 检出；当前发布包未做 Authenticode 代码签名。
+- Microsoft Defender reports zero detections; the release remains unsigned with Authenticode.
+
+### Next / 下一版
+
+- 下一版将转向 GPU 加速路径，带来更高效、更顺滑的透视体验。
+- The next release will move to a GPU-accelerated path for a faster, smoother portal experience.
+
 ## [2.1.0-cpu-alpha.4] - 2026-08-11
 
 ### Fixed

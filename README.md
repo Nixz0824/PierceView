@@ -10,7 +10,7 @@
 
 PierceView is a lightweight Windows tray utility. Hold `F8` to open a selectable rounded feathered rectangle, rounded hard rectangle, or circle around the pointer, then view, scroll, or click the single window directly behind your current work. Release the key to restore the foreground window immediately.
 
-**公开版本 / Public release:** `1.0.6`　|　**本地 CPU 开发版本 / Local CPU development:** `2.1.0-cpu-alpha.4`
+**当前公开版本 / Current public release:** `2.1.0 CPU Edition / CPU 版本`
 
 ## 为什么是寸镜 / Why PierceView
 
@@ -32,22 +32,24 @@ Many `Alt+Tab` trips are not real context switches—you only need a number, a s
 3. 在透视区域内查看、滚动或点击后方的一层普通窗口。View, scroll, or click the ordinary window directly behind it.
 4. 松开 `F8`，关闭透视并恢复当前窗口。Release `F8` to close the portal and restore the foreground.
 
-2.1 alpha 提供可调羽化的圆形、自动圆角矩形，以及把羽化设为 0 后的硬边外观。圆形设置值仍表示完整清晰区，羽化带只向外扩展，因此默认清晰范围不会缩小。所有形状仍使用同一个稳定的单层内核：一次 F8 会话只固定使用紧贴当前窗口后的一个视觉来源，不合成更深层窗口，也不动态切换来源。按住 F8 后即使鼠标不动，后台动态内容也会持续刷新。
+2.1 CPU 版本提供可调羽化的圆形、自动圆角矩形，以及把羽化设为 0 后的硬边外观。圆形设置值仍表示完整清晰区，羽化带只向外扩展，因此默认清晰范围不会缩小。所有形状仍使用同一个稳定的单层内核：一次 F8 会话只固定使用紧贴当前窗口后的一个视觉来源，不合成更深层窗口，也不动态切换来源。按住 F8 后即使鼠标不动，后台动态内容也会持续刷新。
 
-The 2.1 alpha adds adjustable feathering to both circles and automatically rounded rectangles; set feathering to 0 for a hard edge. The circle radius still defines the fully clear area, while feathering expands outward, so the default clear view does not shrink. Every shape keeps the stable single-layer core: each F8 session uses one fixed visual source directly behind the foreground and does not composite or switch to deeper layers. Dynamic background content keeps refreshing even when the pointer stays still.
+The 2.1 CPU Edition adds adjustable feathering to both circles and automatically rounded rectangles; set feathering to 0 for a hard edge. The circle radius still defines the fully clear area, while feathering expands outward, so the default clear view does not shrink. Every shape keeps the stable single-layer core: each F8 session uses one fixed visual source directly behind the foreground and does not composite or switch to deeper layers. Dynamic background content keeps refreshing even when the pointer stays still.
 
 CPU 版本把屏外 DWM 捕获面保留为透视形状四周各大 96 像素的小画布，但用户可见的分层显示窗在一次 F8 会话内固定覆盖 Windows 虚拟屏幕，只更新其中的透明像素，不再随捕获边界移动原生 HWND。后台内容以约 120Hz 为目标抓取，每轮只提交一张最终画面。鼠标中心使用 32 像素锚定交互孔：指针在孔内的小幅移动不会改写宿主 Region，越过 16 像素阈值才重新居中，从而同时降低旧路径闪现和滚轮在前后台之间交替命中的概率。
 
 The CPU build keeps the off-screen DWM capture surface as a small canvas with a 96 px margin, while the user-visible layered surface stays fixed across the Windows virtual screen for the entire F8 session and updates only its transparent pixels—the native display HWND no longer follows capture-boundary moves. Background capture targets roughly 120Hz and each runtime tick presents one final frame. A 32 px anchored input aperture handles native interaction: small pointer motion inside the hole does not rewrite the host Region, and recentering occurs only after crossing a 16 px threshold, reducing both stale-path flashes and wheel routing that alternates between foreground and background.
 
+![寸镜 PierceView 2.1.0 CPU 版本：固定显示层、单帧同步与后台独占交互 / PierceView 2.1.0 CPU Edition: fixed display surface, one-frame hand-off, and background-only input](assets/readme/cpu-edition-upgrade.svg)
+
 ## 下载 / Download
 
-**系统要求 / Requirements:** Windows 10/11 x64。无需安装，解压即用。Windows 10/11 x64; no installer is required.
+**系统要求 / Requirements:** Windows 10/11 x64。无需安装，解压即用；CPU 版本不要求独立显卡。Windows 10/11 x64; no installer is required, and the CPU Edition does not require a discrete GPU.
 
 | 文件 / File | 用途 / Purpose | SHA256 |
 |---|---|---|
-| [PierceView-v1.0.1-win-x64.zip](../../releases/download/v1.0.1/PierceView-v1.0.1-win-x64.zip) | 推荐下载包 / Recommended package | `B37355B6A20FA1B625995CB59BF3343D388BAB8B864CA81263851EE23D47EF4E` |
-| `PierceView.exe` | ZIP 内的自包含程序 / Self-contained app inside the ZIP | `82C3D33D5E4E2730D291BD893298533DC1DAACC3B76F2E39377BD1B6928A1986` |
+| [PierceView-v2.1.0-cpu-win-x64.zip](../../releases/download/v2.1.0/PierceView-v2.1.0-cpu-win-x64.zip) | 推荐 CPU 下载包 / Recommended CPU package | `CCD0E3124950C5F13F6A7167662D923F6A34549CE963A37AD6A69F3B0209A0CB` |
+| [PierceView-v2.1.0-cpu-win-x64.exe](../../releases/download/v2.1.0/PierceView-v2.1.0-cpu-win-x64.exe) | CPU 单文件程序 / CPU single-file app | `122FDD80EB3888E5FB703D8D309574E6A7908EF180E5A89C862F4DB79D84D7BC` |
 
 当前发布包尚未做 Windows 代码签名（Authenticode），系统可能提示“未知发布者”。这表示 Windows 无法通过证书确认发布者身份，**不是**程序缺少产品名或图标。请只从本仓库 [Releases](../../releases) 下载，并用上表 SHA256 校验；来源不确定时不要运行。
 
@@ -66,13 +68,15 @@ The current build is not Authenticode-signed, so Windows may show “Unknown pub
 
 ## 能做什么 / Features
 
-| 能力 / Capability | 2.1 alpha 行为 / Version 2.1 alpha behavior |
+| 能力 / Capability | 2.1 CPU 版本行为 / Version 2.1 CPU Edition behavior |
 |---|---|
 | 系统托盘 / System tray | 普通启动无主窗口；提供启动/暂停、设置、帮助与退出。No persistent main window; Start/Pause, Settings, Help, and Exit live in the tray. |
 | 单层透视 / Single-layer portal | 可选羽化/硬边圆形或自动圆角矩形，显示紧贴当前窗口后的一层普通桌面窗口，并在鼠标静止时持续刷新。Choose a feathered/hard circle or automatically rounded rectangle; dynamic content keeps refreshing while the pointer is still. |
 | 后台交互 / Background interaction | 允许真实滚动与点击，并尽量保持宿主窗口前台与层级。Passes real scroll/click input while preserving the host foreground and Z-order where Windows allows it. |
 | 跨应用拖放 / Cross-app drag-and-drop | 两端应用与权限都兼容时可用；并非所有文字、图片、文件或网页都支持。Works when both apps and privilege levels support the same native drag format. |
 | 双语界面 / Bilingual UI | 托盘、设置、首次提示与帮助支持简体中文和 English。Tray, Settings, first-run hint, and Help support Simplified Chinese and English. |
+
+**下一版预告 / Next release:** 下一版将转向 GPU 加速路径，带来更高效、更顺滑的透视体验。The next release will move to a GPU-accelerated path for a faster, smoother portal experience.
 
 ## 兼容性与安全 / Compatibility & safety
 
@@ -127,7 +131,7 @@ dotnet .\src\WindowPortal\bin\Release\net8.0-windows\PierceView.dll --list-windo
 
 Public docs keep only what users and everyday contributors need:
 
-- [架构 / Architecture](docs/ARCHITECTURE.md) — 2.1 单层圆形/羽化矩形透视如何工作 / how the 2.1 single-layer circle/feathered-rectangle portal works
+- [架构 / Architecture](docs/ARCHITECTURE.md) — 2.1 CPU 单层圆形/羽化矩形透视如何工作 / how the 2.1 CPU single-layer circle/feathered-rectangle portal works
 - [兼容性 / Compatibility](docs/COMPATIBILITY.md) — 适用窗口与已知边界 / supported windows and known boundaries
 - [安全模型 / Security model](docs/SECURITY.md) — 权限、能力边界与安全报告方式 / privileges, capability boundaries, and how to report issues
 - [变更记录 / Changelog](CHANGELOG.md)

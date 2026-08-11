@@ -1,8 +1,8 @@
 # 寸镜 / PierceView 2.1 架构说明
 
-Architecture notes for the **2.1 alpha** single-layer feathered-circle/rounded-rectangle portal. This page describes the current local development build—not internal product roadmaps.
+Architecture notes for the **2.1.0 CPU Edition** single-layer feathered-circle/rounded-rectangle portal. This page describes the public CPU renderer—not internal product roadmaps.
 
-本页说明当前本地开发的 **2.1 alpha** 单层羽化圆形/圆角矩形透视如何工作，不包含内部产品路线。
+本页说明公开发布的 **2.1.0 CPU 版本**单层羽化圆形/圆角矩形透视如何工作，不包含内部产品路线。
 
 ## 总体结构 / Overview
 
