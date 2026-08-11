@@ -112,6 +112,24 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 - 视觉冒烟新增稳定画布重定位、缓存即时提交和旧位置清除断言；真实鼠标/Hover 坐标采样为 `0/384` 异常，四种形状无黑帧或形状异常，最终换帧平均约 `5.17–5.28ms`、最慢 `9.12ms`。
 - Visual smoke now asserts stable-canvas relocation, immediate cached presentation, and stale-position cleanup. Real-pointer/hover alignment reports `0/384` mismatches; all four shapes have no black or invalid frames, with final average updates around `5.17–5.28ms` and a `9.12ms` maximum.
+## [2.1.0-alpha.8] - 2026-08-11
+
+### Fixed
+
+- 修复 alpha.7 仍无法真实点击、滚动或拖放的问题：仅返回 `HTTRANSPARENT` 不能可靠穿过其他线程/进程的顶层窗口；GPU 覆盖窗现在组合 `WS_EX_LAYERED` 与 `WS_EX_TRANSPARENT`，使 Windows 系统命中查找直接跳过该窗，同时继续保持不激活。
+- Fix alpha.7 still blocking real click, scroll, and drag input. Returning `HTTRANSPARENT` alone cannot reliably cross another top-level window's thread/process boundary; the GPU overlay now combines `WS_EX_LAYERED` and `WS_EX_TRANSPARENT` so Windows system hit-testing skips it while activation remains disabled.
+- 修复跨越 192 像素安全边界时旧路径闪现完整透视窗：可见画布会先隐藏并移动，交换链使用 `FlipDiscard` 且每帧清透明，再在新位置显示已提交帧。
+- Fix a full portal flashing on the old path when crossing the 192 px safety boundary. A visible canvas is hidden before relocation, the swap chain uses `FlipDiscard` and clears transparent every frame, and only the newly presented frame is shown at the destination.
+- 宿主的小型交互孔移动后启用重绘，避免旧孔刚被覆盖的像素被 DWM 短暂保留。
+- Redraw the host after moving its small input aperture so DWM does not briefly preserve pixels exposed by the previous aperture.
+
+### Tests
+
+- GPU 冒烟新增真实 `WindowFromPoint` 系统命中跳过检查，并强制执行 3 次跨安全边界重定位；2560×1440 @ 260Hz 实机 P95 0.14ms、P99 0.20ms。
+- The GPU smoke now verifies real system-level `WindowFromPoint` skipping and forces three safety-boundary relocations; on the 2560×1440 @ 260Hz test system it reports P95 0.14ms and P99 0.20ms.
+- CPU 回退视觉冒烟继续通过：移动/Hover 坐标异常 0/384，四种形状无异常帧或疑似过黑帧。
+- The CPU fallback visual smoke still passes with 0/384 motion/hover alignment mismatches and no malformed or suspected-black frames across all four shape modes.
+
 ## [2.1.0-alpha.7] - 2026-08-11
 
 ### Fixed

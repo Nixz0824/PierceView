@@ -4,6 +4,7 @@ using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DirectComposition;
 using Vortice.DXGI;
+using Vortice.Mathematics;
 using Windows.Graphics.Capture;
 using Windows.Graphics.DirectX;
 using Windows.Graphics.DirectX.Direct3D11;
@@ -149,7 +150,7 @@ internal sealed class GpuPortalOverlay : IDisposable
             BufferUsage = Usage.RenderTargetOutput,
             BufferCount = 2,
             Scaling = Scaling.Stretch,
-            SwapEffect = SwapEffect.FlipSequential,
+            SwapEffect = SwapEffect.FlipDiscard,
             AlphaMode = AlphaMode.Premultiplied,
             Flags = SwapChainFlags.FrameLatencyWaitableObject,
         };
@@ -217,6 +218,21 @@ internal sealed class GpuPortalOverlay : IDisposable
     internal int CanvasRelocationCount => Volatile.Read(ref canvasRelocationCount);
 
     internal bool HasInputPassThrough => form.HasInputPassThrough;
+
+    internal bool IsSkippedBySystemHitTestAt(
+        NativeMethods.Point screenPoint)
+    {
+        if (!windowShown)
+        {
+            return false;
+        }
+
+        var hitWindow = NativeMethods.WindowFromPoint(screenPoint);
+        var hitRoot = hitWindow == nint.Zero
+            ? nint.Zero
+            : NativeMethods.GetAncestor(hitWindow, NativeMethods.GaRoot);
+        return hitWindow != form.Handle && hitRoot != form.Handle;
+    }
 
     internal bool TryShow(
         nint sourceWindow,
@@ -339,6 +355,30 @@ internal sealed class GpuPortalOverlay : IDisposable
                 relocateCanvas = true;
             }
 
+            // A Present prepared for the new canvas origin can otherwise be
+            // composited once at the old HWND position before SetWindowPos lands,
+            // which appears as a full portal flashing on the pointer's old path.
+            // Hide and relocate first; the new frame is shown only after Present.
+            if (relocateCanvas && windowShown)
+            {
+                if (!NativeMethods.SetWindowPos(
+                        form.Handle,
+                        NativeMethods.HwndTopMost,
+                        activeCanvasBounds.Left,
+                        activeCanvasBounds.Top,
+                        canvasWidth,
+                        canvasHeight,
+                        NativeMethods.SwpNoActivate |
+                        NativeMethods.SwpNoOwnerZOrder |
+                        NativeMethods.SwpHideWindow))
+                {
+                    error = "无法安全重定位 GPU 透视画布。";
+                    return false;
+                }
+
+                windowShown = false;
+            }
+
             var parameters = new PortalShaderParameters(
                 new Vector4(
                     activeCanvasBounds.Left - sourceBounds.Left,
@@ -368,6 +408,9 @@ internal sealed class GpuPortalOverlay : IDisposable
                 0,
                 null);
             resources.Context.OMSetRenderTargets(renderTarget, null!);
+            resources.Context.ClearRenderTargetView(
+                renderTarget,
+                new Color4(0f, 0f, 0f, 0f));
             resources.Context.RSSetViewport(
                 0,
                 0,
@@ -387,7 +430,7 @@ internal sealed class GpuPortalOverlay : IDisposable
             swapChain.Present(0, PresentFlags.None).CheckError();
             Interlocked.Increment(ref presentedFrames);
 
-            if ((relocateCanvas || !windowShown) &&
+            if (!windowShown &&
                 !NativeMethods.SetWindowPos(
                     form.Handle,
                     NativeMethods.HwndTopMost,
@@ -623,6 +666,7 @@ internal sealed class GpuPortalOverlay : IDisposable
         private const int MaNoActivate = 3;
         private const int WsExTransparent = 0x00000020;
         private const int WsExToolWindow = 0x00000080;
+        private const int WsExLayered = 0x00080000;
         private const int WsExNoActivate = 0x08000000;
         private const int WsExNoRedirectionBitmap = 0x00200000;
 
@@ -639,17 +683,27 @@ internal sealed class GpuPortalOverlay : IDisposable
 
         protected override bool ShowWithoutActivation => true;
 
-        internal bool HasInputPassThrough =>
-            NativeMethods.SendMessage(
-                Handle,
-                WmNcHitTest,
-                nint.Zero,
-                nint.Zero) == new nint(HtTransparent) &&
-            NativeMethods.SendMessage(
-                Handle,
-                WmMouseActivate,
-                nint.Zero,
-                nint.Zero) == new nint(MaNoActivate);
+        internal bool HasInputPassThrough
+        {
+            get
+            {
+                var extendedStyle = NativeMethods.GetWindowLongPtr(
+                    Handle,
+                    NativeMethods.GwlExStyle).ToInt64();
+                var requiredStyles = WsExLayered | WsExTransparent;
+                return (extendedStyle & requiredStyles) == requiredStyles &&
+                    NativeMethods.SendMessage(
+                        Handle,
+                        WmNcHitTest,
+                        nint.Zero,
+                        nint.Zero) == new nint(HtTransparent) &&
+                    NativeMethods.SendMessage(
+                        Handle,
+                        WmMouseActivate,
+                        nint.Zero,
+                        nint.Zero) == new nint(MaNoActivate);
+            }
+        }
 
         protected override CreateParams CreateParams
         {
@@ -659,6 +713,7 @@ internal sealed class GpuPortalOverlay : IDisposable
                 parameters.ExStyle |=
                     WsExTransparent |
                     WsExToolWindow |
+                    WsExLayered |
                     WsExNoActivate |
                     WsExNoRedirectionBitmap;
                 return parameters;

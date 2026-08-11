@@ -54,6 +54,7 @@ internal static class GpuPortalSmokeTests
             var updates = 0L;
             var maximumUpdateMilliseconds = 0d;
             var updateDurations = new List<double>();
+            var systemHitTestVerified = false;
             while (stopwatch.ElapsedMilliseconds < durationMilliseconds)
             {
                 var phase = stopwatch.Elapsed.TotalSeconds * 2.4;
@@ -67,6 +68,19 @@ internal static class GpuPortalSmokeTests
                     return 17;
                 }
 
+                if (!systemHitTestVerified && overlay.PresentedFrames > 0)
+                {
+                    if (!overlay.IsSkippedBySystemHitTestAt(point))
+                    {
+                        Console.Error.WriteLine(
+                            "系统 WindowFromPoint 仍命中 GPU 覆盖窗。"
+                        );
+                        return 17;
+                    }
+
+                    systemHitTestVerified = true;
+                }
+
                 var updateMilliseconds =
                     Stopwatch.GetElapsedTime(updateStartedAt).TotalMilliseconds;
                 updateDurations.Add(updateMilliseconds);
@@ -77,9 +91,36 @@ internal static class GpuPortalSmokeTests
                 highResolutionWaiter.Wait(2);
             }
 
+            var safeCanvasRelocations = overlay.CanvasRelocationCount;
+            var relocationDistance = GpuPortalOverlay.OverscanMargin * 2 + 64;
+            var relocationPoints = new[]
+            {
+                new NativeMethods.Point(center.X + relocationDistance, center.Y),
+                new NativeMethods.Point(center.X - relocationDistance, center.Y),
+                center,
+            };
+            foreach (var relocationPoint in relocationPoints)
+            {
+                if (!overlay.TryUpdate(relocationPoint, out var relocationError))
+                {
+                    Console.Error.WriteLine(relocationError);
+                    return 17;
+                }
+
+                if (!overlay.IsSkippedBySystemHitTestAt(relocationPoint))
+                {
+                    Console.Error.WriteLine(
+                        "GPU 画布重定位后重新成为系统鼠标命中目标。");
+                    return 17;
+                }
+
+                highResolutionWaiter.Wait(8);
+            }
+
             var capturedFrames = overlay.CapturedFrames;
             var presentedFrames = overlay.PresentedFrames;
             var canvasRelocations = overlay.CanvasRelocationCount;
+            var boundaryRelocations = canvasRelocations - safeCanvasRelocations;
             updateDurations.Sort();
             var p95 = Percentile(updateDurations, 0.95);
             var p99 = Percentile(updateDurations, 0.99);
@@ -87,7 +128,8 @@ internal static class GpuPortalSmokeTests
             Console.WriteLine(
                 $"调度={updates}，WGC 新帧={capturedFrames}，" +
                 $"GPU 透视提交={presentedFrames}，" +
-                $"画布重定位={canvasRelocations}，" +
+                $"安全范围重定位={safeCanvasRelocations}，" +
+                $"跨界重定位={boundaryRelocations}，" +
                 $"P95={p95:F2}ms，P99={p99:F2}ms，" +
                 $"最慢={maximumUpdateMilliseconds:F2}ms，" +
                 $"高精度定时={highResolutionWaiter.IsHighResolution}。");
@@ -97,10 +139,23 @@ internal static class GpuPortalSmokeTests
                 return 18;
             }
 
-            if (canvasRelocations > 1)
+            if (!systemHitTestVerified)
+            {
+                Console.Error.WriteLine("GPU 覆盖窗未完成系统命中跳过验证。");
+                return 18;
+            }
+
+            if (safeCanvasRelocations > 1)
             {
                 Console.Error.WriteLine(
-                    $"192px 安全边界内不应重复移动 GPU 窗口，实际={canvasRelocations}。");
+                    $"192px 安全边界内不应重复移动 GPU 窗口，实际={safeCanvasRelocations}。");
+                return 18;
+            }
+
+            if (boundaryRelocations < 2)
+            {
+                Console.Error.WriteLine(
+                    $"GPU 冒烟未覆盖跨安全边界重定位，实际={boundaryRelocations}。");
                 return 18;
             }
 
