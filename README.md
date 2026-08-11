@@ -10,7 +10,7 @@
 
 PierceView is a lightweight Windows tray utility. Hold `F8` to open a selectable rounded feathered rectangle, rounded hard rectangle, or circle around the pointer, then view, scroll, or click the single window directly behind your current work. Release the key to restore the foreground window immediately.
 
-**公开版本 / Public release:** `1.0.6`　|　**本地开发版本 / Local development:** `2.1.0-alpha.5`
+**公开版本 / Public release:** `1.0.6`　|　**本地 CPU 开发版本 / Local CPU development:** `2.1.0-cpu-alpha.1`
 
 ## 为什么是寸镜 / Why PierceView
 
@@ -36,9 +36,9 @@ Many `Alt+Tab` trips are not real context switches—you only need a number, a s
 
 The 2.1 alpha adds adjustable feathering to both circles and automatically rounded rectangles; set feathering to 0 for a hard edge. The circle radius still defines the fully clear area, while feathering expands outward, so the default clear view does not shrink. Every shape keeps the stable single-layer core: each F8 session uses one fixed visual source directly behind the foreground and does not composite or switch to deeper layers. Dynamic background content keeps refreshing even when the pointer stays still.
 
-移动时，屏外单张 DWM 缩略图会额外保留 64 像素安全边界。鼠标在边界内移动只做 CPU 对齐裁剪；抓取完成后还会在提交前读取最新鼠标位置，用安全边界内的同一帧重新对齐。显示窗会在一次 F8 会话内复用 DIB 与内存 DC，减少重复创建 GDI 资源造成的掉帧和相邻帧重影。
+CPU 版本使用比透视形状四周各大 96 像素的稳定画布。鼠标在安全范围内移动时，原生显示窗口保持不动，只把上一张原始抓帧中的形状立即移到新位置；后台内容则继续约 60Hz 抓取，并在提交前读取最新鼠标坐标重新对齐。只有跨出安全范围才同步更新 DWM 来源和显示画布，避免逐像素移动两个系统窗口造成的抖动、残影与旧路径闪现。
 
-While moving, the single off-screen DWM thumbnail keeps a 64 px safety margin. Motion inside it uses CPU-aligned cropping; after capture, PierceView reads the latest pointer position and realigns the same buffered frame before presentation. The display reuses its DIB and memory DC for the F8 session, reducing dropped frames and adjacent-frame ghosting caused by repeated GDI resource creation.
+The CPU build uses a stable canvas with a 96 px margin around the portal. While the pointer stays inside that margin, the native display window does not move; the shape is immediately repositioned over the latest raw captured frame. Background content continues to capture at roughly 60Hz and is late-latched to the newest pointer coordinates before presentation. DWM source and display-canvas relocation happen only after crossing the margin, avoiding jitter, ghosting, and stale-path flashes caused by moving two native windows pixel by pixel.
 
 ## 下载 / Download
 

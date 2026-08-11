@@ -283,6 +283,7 @@ internal static class VisualSmokeTests
 		RunPatternAlignmentTest(hardRoundedGeometry, frontColor, failures);
 		RunLateLatchAlignmentTest(hardRoundedGeometry, frontColor, failures);
 		RunRealCursorHoverAlignmentTest(hardRoundedGeometry, frontColor, failures);
+		RunStableCanvasTrailTest(frontColor, backColor, failures);
 
 		RunShape(
 			"圆形硬边模式",
@@ -538,10 +539,13 @@ internal static class VisualSmokeTests
 			}
 
 			var sourceUpdates = overlay.CaptureSourceUpdateCount;
+			var displayRelocations = overlay.DisplayRelocationCount;
+			var cachedPresentations = overlay.CachedPresentationCount;
 			Console.WriteLine(
 				$"真实鼠标 Hover 对齐：异常帧={mismatchedFrames}/{frameCount}，" +
 				$"异常采样={mismatchedSamples}/{samples}，Hover 重绘={back.HoverRepaintCount}，" +
-				$"DWM 来源重定位={sourceUpdates}。");
+				$"DWM 来源重定位={sourceUpdates}，显示画布重定位={displayRelocations}，" +
+				$"缓存即时提交={cachedPresentations}。");
 			if (back.HoverRepaintCount < 4)
 			{
 				failures.Add("后台 Hover 重绘次数不足，测试场景无效。");
@@ -558,6 +562,18 @@ internal static class VisualSmokeTests
 			if (sourceUpdates > 12)
 			{
 				failures.Add($"真实鼠标移动时 DWM 来源重定位过多：{sourceUpdates} 次。");
+			}
+
+			if (displayRelocations > sourceUpdates + 1)
+			{
+				failures.Add(
+					$"显示画布出现逐像素移动：DWM 来源 {sourceUpdates} 次，" +
+					$"显示画布 {displayRelocations} 次。");
+			}
+
+			if (cachedPresentations < frameCount / 2)
+			{
+				failures.Add($"缓存画布即时跟随次数不足：{cachedPresentations}/{frameCount}。");
 			}
 		}
 		finally
@@ -637,13 +653,16 @@ internal static class VisualSmokeTests
 		}
 
 		var sourceUpdates = overlay.CaptureSourceUpdateCount;
+		var displayRelocations = overlay.DisplayRelocationCount;
+		var cachedPresentations = overlay.CachedPresentationCount;
 		overlay.Hide();
 		front.Close();
 		back.Close();
 		Application.DoEvents();
 		Console.WriteLine(
 			$"高对比内容坐标对齐：错位帧={mismatches}/{samples}，" +
-			$"DWM 来源重定位={sourceUpdates}。");
+			$"DWM 来源重定位={sourceUpdates}，显示画布重定位={displayRelocations}，" +
+			$"缓存即时提交={cachedPresentations}。");
 		if (samples < frameCount / 2 || mismatches > Math.Max(2, samples / 16))
 		{
 			failures.Add($"高对比文字/图像区域错位帧过多：{mismatches}/{samples}。");
@@ -652,6 +671,99 @@ internal static class VisualSmokeTests
 		if (sourceUpdates > 3)
 		{
 			failures.Add($"安全边界内移动仍重复重设 DWM 来源：{sourceUpdates} 次。");
+		}
+
+		if (displayRelocations > 1)
+		{
+			failures.Add($"安全边界内移动仍重复移动显示画布：{displayRelocations} 次。");
+		}
+
+		if (cachedPresentations < frameCount / 2)
+		{
+			failures.Add($"安全画布缓存即时跟随次数不足：{cachedPresentations}/{frameCount}。");
+		}
+	}
+
+	private static void RunStableCanvasTrailTest(
+		Color frontColor,
+		Color backColor,
+		List<string> failures)
+	{
+		var geometry = PortalGeometry.Circle(28, 4);
+		using var back = CreateColorWindow(
+			"PierceView Smoke Back - Stable Canvas Trail",
+			backColor,
+			120,
+			120,
+			720,
+			520);
+		using var front = CreateColorWindow(
+			"PierceView Smoke Front - Stable Canvas Trail",
+			frontColor,
+			160,
+			160,
+			640,
+			460);
+		back.TopMost = false;
+		back.Show();
+		front.Show();
+		front.BringToFront();
+		front.Activate();
+		Application.DoEvents();
+		Thread.Sleep(160);
+		var origin = new NativeMethods.Point(
+			front.Left + (front.Width / 2) - 40,
+			front.Top + (front.Height / 2));
+		var moved = new NativeMethods.Point(origin.X + 72, origin.Y);
+		using var overlay = new DwmPortalOverlay(geometry, enableForegroundGuard: false);
+		if (!overlay.TryShow(back.Handle, front.Handle, origin, out var showError))
+		{
+			failures.Add("稳定画布残留测试无法显示透视：" + showError);
+			return;
+		}
+
+		Application.DoEvents();
+		Thread.Sleep(20);
+		var relocationsBeforeMove = overlay.DisplayRelocationCount;
+		if (!overlay.TryUpdate(moved, out var updateError))
+		{
+			failures.Add("稳定画布残留测试无法移动透视：" + updateError);
+			return;
+		}
+
+		Application.DoEvents();
+		Thread.Sleep(12);
+		using var oldShot = CaptureScreenRect(origin.X - 20, origin.Y, 1, 1);
+		using var newShot = CaptureScreenRect(moved.X, moved.Y, 1, 1);
+		var oldPixel = oldShot.GetPixel(0, 0);
+		var newPixel = newShot.GetPixel(0, 0);
+		var relocationsAfterMove = overlay.DisplayRelocationCount;
+		var cachedPresentations = overlay.CachedPresentationCount;
+		var oldCleared = ColorDistance(oldPixel, frontColor) + 400 <
+		                 ColorDistance(oldPixel, backColor);
+		var newVisible = ColorDistance(newPixel, backColor) + 400 <
+		                 ColorDistance(newPixel, frontColor);
+		Console.WriteLine(
+			$"CPU 稳定画布残留：旧位置已清除={oldCleared}，新位置可见={newVisible}，" +
+			$"显示画布重定位={relocationsBeforeMove}->{relocationsAfterMove}，" +
+			$"缓存即时提交={cachedPresentations}。");
+
+		if (!oldCleared || !newVisible)
+		{
+			failures.Add(
+				$"CPU 稳定画布移动后残留异常：old={oldPixel}, new={newPixel}。");
+		}
+
+		if (relocationsAfterMove != relocationsBeforeMove)
+		{
+			failures.Add(
+				$"安全边界内移动不应重定位显示画布：" +
+				$"{relocationsBeforeMove}->{relocationsAfterMove}。");
+		}
+
+		if (cachedPresentations < 1)
+		{
+			failures.Add("安全边界内移动没有使用缓存帧即时提交。");
 		}
 	}
 

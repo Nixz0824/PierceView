@@ -79,6 +79,7 @@ internal sealed class PortalRuntime : IDisposable
             geometry,
             enableForegroundGuard: true,
             lateLatchToCursor: true);
+        using var highResolutionWaiter = new HighResolutionWaiter();
         var wasActivationHeld = false;
         var visualWarningShown = false;
         try
@@ -150,11 +151,16 @@ internal sealed class PortalRuntime : IDisposable
                 }
 
                 wasActivationHeld = activationHeld;
-                var remainingMilliseconds =
-                    pollMilliseconds - Stopwatch.GetElapsedTime(loopStartedAt).TotalMilliseconds;
+				// CPU 抓帧仍约 60Hz，但安全画布中的缓存帧位置以约 4ms 节奏跟随鼠标。
+				// 只有按住 F8 时启用高频等待，不改变托盘空闲时的功耗。
+				var targetLoopMilliseconds = activationHeld
+					? Math.Min(pollMilliseconds, 4)
+					: pollMilliseconds;
+				var remainingMilliseconds =
+					targetLoopMilliseconds - Stopwatch.GetElapsedTime(loopStartedAt).TotalMilliseconds;
                 if (remainingMilliseconds >= 1)
                 {
-                    Thread.Sleep((int)Math.Floor(remainingMilliseconds));
+					highResolutionWaiter.Wait(remainingMilliseconds);
                 }
                 else
                 {

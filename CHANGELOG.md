@@ -10,6 +10,27 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 - （暂无）
 
+## [2.1.0-cpu-alpha.1] - 2026-08-11
+
+### Fixed
+
+- CPU 透视改用比形状四周各大 96 像素的稳定分层画布：安全范围内只移动画布内部的 alpha 形状，不再逐像素移动原生显示 HWND；跨界时才同步更新 DWM 来源与显示位置，减少移动时的整体抖动、重影和旧路径残留。
+- Move the CPU portal to a stable layered canvas with a 96 px margin around the shape. Motion inside the margin moves only the alpha shape inside the canvas rather than the native display HWND; DWM source and display position update together only after crossing the margin, reducing whole-frame jitter, ghosting, and stale-path remnants.
+- DWM 来源跨越安全边界时执行一次同步，避免新画布坐标配上旧缩略图内容；边界内不执行全局 DWM flush。
+- Synchronize DWM once when the source crosses the safe-canvas boundary so new canvas coordinates cannot be paired with old thumbnail content; no global DWM flush occurs for motion inside the margin.
+
+### Performance
+
+- 鼠标位置变化先复用最近的原始抓帧即时提交，后台内容抓取维持约 60Hz；F8 会话使用约 4ms 的高精度等待节奏，使形状跟随不再完全受 `PrintWindow` 延迟限制。
+- Reuse the latest raw frame for immediate pointer-position submissions while refreshing background content at roughly 60Hz. A roughly 4ms high-resolution wait cadence keeps shape tracking from being fully gated by `PrintWindow` latency.
+- alpha 合成直接写入会话复用的 DIB，移除最终尺寸位图克隆与一次额外像素复制。
+- Write alpha composition directly into the session-reused DIB, removing the final-sized bitmap clone and one extra pixel copy.
+
+### Tests
+
+- 视觉冒烟新增稳定画布重定位、缓存即时提交和旧位置清除断言；真实鼠标/Hover 坐标采样为 `0/384` 异常，四种形状无黑帧或形状异常，最终换帧平均约 `5.17–5.28ms`、最慢 `9.12ms`。
+- Visual smoke now asserts stable-canvas relocation, immediate cached presentation, and stale-position cleanup. Real-pointer/hover alignment reports `0/384` mismatches; all four shapes have no black or invalid frames, with final average updates around `5.17–5.28ms` and a `9.12ms` maximum.
+
 ## [2.1.0-alpha.5] - 2026-08-11
 
 ### Fixed
