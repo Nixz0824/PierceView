@@ -5,11 +5,181 @@ using System.Runtime.InteropServices;
 namespace WindowPortal;
 
 /// <summary>
-/// 自动视觉冒烟：自建红/绿色块窗，只驱动 DWM 透视层（不挖自身窗口洞），
-/// 采样形状边缘、过渡带与中心，拦住「变方 / 羽化失效 / 过黑闪帧」回归。
+/// 自动视觉冒烟：自建颜色/坐标图案窗，覆盖静止刷新、真实鼠标移动、
+/// 后台控件 Hover 重绘、内容对齐、形状边缘、羽化带与过黑闪帧。
 /// </summary>
 internal static class VisualSmokeTests
 {
+	private sealed class PatternWindow : Form
+	{
+		private const int CellSize = 8;
+
+		private static readonly Color[] Palette =
+		[
+			Color.FromArgb(255, 20, 80, 220),
+			Color.FromArgb(255, 20, 190, 80),
+			Color.FromArgb(255, 240, 180, 20),
+			Color.FromArgb(255, 210, 30, 170),
+			Color.FromArgb(255, 20, 190, 210),
+			Color.FromArgb(255, 235, 80, 25),
+			Color.FromArgb(255, 235, 235, 235),
+			Color.FromArgb(255, 35, 35, 45)
+		];
+
+		private readonly Bitmap _pattern;
+
+		private readonly Bitmap? _hoverImage;
+
+		internal int HoverRepaintCount { get; private set; }
+
+		internal PatternWindow(
+			string title,
+			int x,
+			int y,
+			int width,
+			int height,
+			bool addHoverControls = false)
+		{
+			Text = title;
+			FormBorderStyle = FormBorderStyle.None;
+			StartPosition = FormStartPosition.Manual;
+			Bounds = new Rectangle(x, y, width, height);
+			TopMost = false;
+			ShowInTaskbar = false;
+			_pattern = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+			using var graphics = Graphics.FromImage(_pattern);
+			for (var cellY = 0; cellY * CellSize < height; cellY++)
+			{
+				for (var cellX = 0; cellX * CellSize < width; cellX++)
+				{
+					using var brush = new SolidBrush(Palette[PaletteIndex(cellX, cellY)]);
+					graphics.FillRectangle(
+						brush,
+						cellX * CellSize,
+						cellY * CellSize,
+						CellSize,
+						CellSize);
+				}
+			}
+
+			if (addHoverControls)
+			{
+				var hoverY = Math.Max(24, (height / 2) - 28);
+				var link = new LinkLabel
+				{
+					Text = "Hover text",
+					TextAlign = ContentAlignment.MiddleCenter,
+					BackColor = Color.White,
+					LinkColor = Color.FromArgb(20, 80, 220),
+					Bounds = new Rectangle((width / 2) - 150, hoverY, 100, 56)
+				};
+				var button = new Button
+				{
+					Text = "Hover button",
+					FlatStyle = FlatStyle.System,
+					Bounds = new Rectangle((width / 2) - 45, hoverY, 110, 56)
+				};
+				_hoverImage = new Bitmap(80, 56, PixelFormat.Format32bppArgb);
+				using (var imageGraphics = Graphics.FromImage(_hoverImage))
+				{
+					imageGraphics.Clear(Color.FromArgb(245, 190, 30));
+					using var pen = new Pen(Color.FromArgb(30, 60, 180), 4);
+					imageGraphics.DrawEllipse(pen, 14, 8, 48, 40);
+				}
+
+				var image = new PictureBox
+				{
+					Image = _hoverImage,
+					SizeMode = PictureBoxSizeMode.StretchImage,
+					Bounds = new Rectangle((width / 2) + 70, hoverY, 80, 56)
+				};
+				foreach (Control control in new Control[] { link, button, image })
+				{
+					control.MouseEnter += (_, _) => RegisterHoverActivity(control, entered: true);
+					control.MouseLeave += (_, _) => RegisterHoverActivity(control, entered: false);
+					control.MouseMove += (_, _) => RegisterHoverActivity(control, entered: true);
+					Controls.Add(control);
+				}
+			}
+		}
+
+		internal int ExpectedPaletteIndex(NativeMethods.Point screenPoint)
+		{
+			var localX = Math.Clamp(screenPoint.X - Left, 0, ClientSize.Width - 1);
+			var localY = Math.Clamp(screenPoint.Y - Top, 0, ClientSize.Height - 1);
+			return PaletteIndex(localX / CellSize, localY / CellSize);
+		}
+
+		internal static int ClosestPaletteIndex(Color color)
+		{
+			var closest = 0;
+			var closestDistance = int.MaxValue;
+			for (var index = 0; index < Palette.Length; index++)
+			{
+				var distance = ColorDistance(color, Palette[index]);
+				if (distance < closestDistance)
+				{
+					closest = index;
+					closestDistance = distance;
+				}
+			}
+
+			return closest;
+		}
+
+		internal void ForceHoverRepaint(NativeMethods.Point screenPoint)
+		{
+			var localPoint = new Point(screenPoint.X - Left, screenPoint.Y - Top);
+			HoverRepaintCount++;
+			foreach (Control control in Controls)
+			{
+				var entered = control.Bounds.Contains(localPoint);
+				if (control is not Button)
+				{
+					control.BackColor = entered
+						? Color.FromArgb(220, 235, 255)
+						: Color.White;
+				}
+
+				control.Invalidate();
+			}
+
+			Update();
+		}
+
+		protected override void OnPaintBackground(PaintEventArgs eventArgs)
+		{
+			eventArgs.Graphics.DrawImageUnscaled(_pattern, 0, 0);
+		}
+
+		protected override void Dispose(bool disposing)
+		{
+			if (disposing)
+			{
+				_hoverImage?.Dispose();
+				_pattern.Dispose();
+			}
+
+			base.Dispose(disposing);
+		}
+
+		private static int PaletteIndex(int cellX, int cellY) =>
+			Math.Abs((cellX * 3) + (cellY * 5)) % Palette.Length;
+
+		private void RegisterHoverActivity(Control control, bool entered)
+		{
+			HoverRepaintCount++;
+			if (control is not Button)
+			{
+				control.BackColor = entered
+					? Color.FromArgb(220, 235, 255)
+					: Color.White;
+			}
+
+			control.Invalidate();
+		}
+	}
+
 	internal static int Run(int radius = 120)
 	{
 		radius = Math.Clamp(radius, 64, 200);
@@ -78,6 +248,18 @@ internal static class VisualSmokeTests
 		var hardRoundedGeometry = PortalGeometry.Rectangle(
 			UserSettings.DefaultRectangleWidth,
 			UserSettings.DefaultRectangleHeight);
+		var featheredCircleGeometry = PortalGeometry.Circle(
+			radius + UserSettings.DefaultFeatherWidth,
+			UserSettings.DefaultFeatherWidth);
+		if (!ValidateFeatherMask(featheredCircleGeometry, backColor, out var circleMaskDetail))
+		{
+			failures.Add("圆形羽化 alpha 蒙版异常：" + circleMaskDetail);
+		}
+		else
+		{
+			Console.WriteLine("圆形羽化 alpha 蒙版：" + circleMaskDetail);
+		}
+
 		if (!ValidateHardRoundedMask(hardRoundedGeometry, backColor, out var hardMaskDetail))
 		{
 			failures.Add("硬边圆角 alpha 蒙版异常：" + hardMaskDetail);
@@ -97,10 +279,20 @@ internal static class VisualSmokeTests
 		}
 
 		RunStationaryRefreshTest(hardRoundedGeometry, frontColor, backColor, failures);
+		RunPatternAlignmentTest(hardRoundedGeometry, frontColor, failures);
+		RunRealCursorHoverAlignmentTest(hardRoundedGeometry, frontColor, failures);
 
 		RunShape(
-			"圆形兼容模式",
+			"圆形硬边模式",
 			PortalGeometry.Circle(radius),
+			frontColor,
+			backColor,
+			(Bitmap shot, PortalGeometry geometry, out string detail) =>
+				LooksCircular(shot, geometry.Radius, backColor, frontColor, out detail),
+			failures);
+		RunShape(
+			"圆形羽化模式",
+			featheredCircleGeometry,
 			frontColor,
 			backColor,
 			(Bitmap shot, PortalGeometry geometry, out string detail) =>
@@ -122,6 +314,235 @@ internal static class VisualSmokeTests
 			(Bitmap shot, PortalGeometry geometry, out string detail) =>
 				LooksFeatheredRectangleContent(shot, geometry, backColor, frontColor, out detail),
 			failures);
+	}
+
+	private static void RunRealCursorHoverAlignmentTest(
+		PortalGeometry geometry,
+		Color frontColor,
+		List<string> failures)
+	{
+		using var back = new PatternWindow(
+			"PierceView Smoke Back - Real Cursor Hover",
+			120,
+			120,
+			720,
+			520,
+			addHoverControls: true);
+		using var front = CreateColorWindow(
+			"PierceView Smoke Front - Real Cursor Hover",
+			frontColor,
+			160,
+			160,
+			640,
+			460);
+		NativeMethods.GetCursorPos(out var originalCursor);
+		back.Show();
+		front.Show();
+		front.BringToFront();
+		front.Activate();
+		Application.DoEvents();
+		Thread.Sleep(200);
+		var origin = new NativeMethods.Point(
+			front.Left + (front.Width / 2),
+			front.Top + (front.Height / 2));
+		using var overlay = new DwmPortalOverlay(geometry, enableForegroundGuard: false);
+		try
+		{
+			if (!TryApplyTestHole(front, origin, geometry, out var holeError))
+			{
+				failures.Add("真实鼠标 Hover 测试无法创建窗口缺口：" + holeError);
+				return;
+			}
+
+			if (!NativeMethods.SetCursorPos(origin.X, origin.Y))
+			{
+				failures.Add("真实鼠标 Hover 测试无法移动系统鼠标。");
+				return;
+			}
+
+			Application.DoEvents();
+			Thread.Sleep(80);
+			if (!overlay.TryShow(back.Handle, front.Handle, origin, out var showError))
+			{
+				failures.Add("真实鼠标 Hover 测试无法显示透视：" + showError);
+				return;
+			}
+
+			var mismatchedFrames = 0;
+			var mismatchedSamples = 0;
+			var samples = 0;
+			const int frameCount = 64;
+			var sampleOffsets = new[]
+			{
+				new NativeMethods.Point(-96, -96),
+				new NativeMethods.Point(0, -96),
+				new NativeMethods.Point(96, -96),
+				new NativeMethods.Point(-96, 96),
+				new NativeMethods.Point(0, 96),
+				new NativeMethods.Point(96, 96)
+			};
+			for (var frame = 0; frame < frameCount; frame++)
+			{
+				var phase = frame % 32;
+				var offset = phase < 16
+					? -120 + (phase * 8)
+					: 120 - ((phase - 16) * 8);
+				var point = new NativeMethods.Point(origin.X + offset, origin.Y);
+				if (!TryApplyTestHole(front, point, geometry, out var moveHoleError))
+				{
+					failures.Add("真实鼠标 Hover 测试无法移动交互孔：" + moveHoleError);
+					break;
+				}
+
+				if (!NativeMethods.SetCursorPos(point.X, point.Y))
+				{
+					failures.Add("真实鼠标 Hover 测试中途无法移动系统鼠标。");
+					break;
+				}
+
+				Application.DoEvents();
+				back.ForceHoverRepaint(point);
+				Thread.Sleep(4);
+				if (!overlay.TryUpdate(point, out var updateError))
+				{
+					failures.Add("真实鼠标 Hover 对齐更新失败：" + updateError);
+					break;
+				}
+
+				Application.DoEvents();
+				Thread.Sleep(12);
+				var bounds = geometry.CreateFrameBounds(point);
+				using var shot = CaptureScreenRect(
+					bounds.Left,
+					bounds.Top,
+					geometry.FrameWidth,
+					geometry.FrameHeight);
+				var frameMismatch = false;
+				foreach (var sampleOffset in sampleOffsets)
+				{
+					var sourcePoint = new NativeMethods.Point(
+						point.X + sampleOffset.X,
+						point.Y + sampleOffset.Y);
+					var observedColor = shot.GetPixel(
+						(geometry.FrameWidth / 2) + sampleOffset.X,
+						(geometry.FrameHeight / 2) + sampleOffset.Y);
+					var observed = PatternWindow.ClosestPaletteIndex(observedColor);
+					var expected = back.ExpectedPaletteIndex(sourcePoint);
+					samples++;
+					if (observed != expected)
+					{
+						mismatchedSamples++;
+						frameMismatch = true;
+					}
+				}
+
+				if (frameMismatch)
+				{
+					mismatchedFrames++;
+				}
+			}
+
+			Console.WriteLine(
+				$"真实鼠标 Hover 对齐：异常帧={mismatchedFrames}/{frameCount}，" +
+				$"异常采样={mismatchedSamples}/{samples}，Hover 重绘={back.HoverRepaintCount}。");
+			if (back.HoverRepaintCount < 4)
+			{
+				failures.Add("后台 Hover 重绘次数不足，测试场景无效。");
+			}
+
+			if (samples < frameCount * sampleOffsets.Length / 2 ||
+			    mismatchedFrames > Math.Max(2, frameCount / 16))
+			{
+				failures.Add(
+					$"真实鼠标经过文字/图像控件时出现过多坐标错位：" +
+					$"{mismatchedFrames}/{frameCount} 帧，{mismatchedSamples}/{samples} 个采样。");
+			}
+		}
+		finally
+		{
+			overlay.Hide();
+			_ = NativeMethods.SetWindowRgn(front.Handle, nint.Zero, redraw: true);
+			_ = NativeMethods.SetCursorPos(originalCursor.X, originalCursor.Y);
+			front.Close();
+			back.Close();
+			Application.DoEvents();
+		}
+	}
+
+	private static void RunPatternAlignmentTest(
+		PortalGeometry geometry,
+		Color frontColor,
+		List<string> failures)
+	{
+		using var back = new PatternWindow(
+			"PierceView Smoke Back - Pattern Alignment",
+			120,
+			120,
+			720,
+			520);
+		using var front = CreateColorWindow(
+			"PierceView Smoke Front - Pattern Alignment",
+			frontColor,
+			160,
+			160,
+			640,
+			460);
+		back.Show();
+		front.Show();
+		front.BringToFront();
+		front.Activate();
+		Application.DoEvents();
+		Thread.Sleep(200);
+		var origin = new NativeMethods.Point(
+			front.Left + (front.Width / 2),
+			front.Top + (front.Height / 2));
+		using var overlay = new DwmPortalOverlay(geometry, enableForegroundGuard: false);
+		if (!overlay.TryShow(back.Handle, front.Handle, origin, out var showError))
+		{
+			failures.Add("高对比内容对齐测试无法显示透视：" + showError);
+			return;
+		}
+
+		Thread.Sleep(100);
+		Application.DoEvents();
+		var mismatches = 0;
+		var samples = 0;
+		const int frameCount = 64;
+		for (var frame = 0; frame < frameCount; frame++)
+		{
+			var phase = frame % 32;
+			var offset = phase < 16
+				? -64 + (phase * 8)
+				: 64 - ((phase - 16) * 8);
+			var point = new NativeMethods.Point(origin.X + offset, origin.Y);
+			if (!overlay.TryUpdate(point, out var updateError))
+			{
+				failures.Add("高对比内容对齐更新失败：" + updateError);
+				break;
+			}
+
+			Application.DoEvents();
+			using var shot = CaptureScreenRect(point.X, point.Y, 1, 1);
+			var observed = PatternWindow.ClosestPaletteIndex(shot.GetPixel(0, 0));
+			var expected = back.ExpectedPaletteIndex(point);
+			samples++;
+			if (observed != expected)
+			{
+				mismatches++;
+			}
+
+			Thread.Sleep(16);
+		}
+
+		overlay.Hide();
+		front.Close();
+		back.Close();
+		Application.DoEvents();
+		Console.WriteLine($"高对比内容坐标对齐：错位帧={mismatches}/{samples}。");
+		if (samples < frameCount / 2 || mismatches > Math.Max(2, samples / 16))
+		{
+			failures.Add($"高对比文字/图像区域错位帧过多：{mismatches}/{samples}。");
+		}
 	}
 
 	private static void RunStationaryRefreshTest(
@@ -323,6 +744,65 @@ internal static class VisualSmokeTests
 			TopMost = true,
 			ShowInTaskbar = false
 		};
+	}
+
+	private static bool TryApplyTestHole(
+		Form window,
+		NativeMethods.Point screenCenter,
+		PortalGeometry geometry,
+		out string? error)
+	{
+		var center = new NativeMethods.Point(
+			screenCenter.X - window.Left,
+			screenCenter.Y - window.Top);
+		var bounds = WindowRegionController.CreateHoleBounds(
+			center,
+			geometry.EffectiveInteractionRadius);
+		var windowRegion = NativeMethods.CreateRectRgn(0, 0, window.Width, window.Height);
+		var holeRegion = NativeMethods.CreateEllipticRgn(
+			bounds.Left,
+			bounds.Top,
+			bounds.Right,
+			bounds.Bottom);
+
+		if (windowRegion == nint.Zero || holeRegion == nint.Zero)
+		{
+			if (windowRegion != nint.Zero)
+			{
+				_ = NativeMethods.DeleteObject(windowRegion);
+			}
+
+			if (holeRegion != nint.Zero)
+			{
+				_ = NativeMethods.DeleteObject(holeRegion);
+			}
+
+			error = "无法创建测试区域。";
+			return false;
+		}
+
+		var combineResult = NativeMethods.CombineRgn(
+			windowRegion,
+			windowRegion,
+			holeRegion,
+			NativeMethods.RgnDiff);
+		_ = NativeMethods.DeleteObject(holeRegion);
+		if (combineResult == 0)
+		{
+			_ = NativeMethods.DeleteObject(windowRegion);
+			error = "无法从测试前景窗减去透视区域。";
+			return false;
+		}
+
+		if (NativeMethods.SetWindowRgn(window.Handle, windowRegion, redraw: true) == 0)
+		{
+			_ = NativeMethods.DeleteObject(windowRegion);
+			error = "Windows 拒绝设置测试窗口缺口。";
+			return false;
+		}
+
+		error = null;
+		return true;
 	}
 
 	private static Bitmap CaptureScreenRect(int left, int top, int width, int height)

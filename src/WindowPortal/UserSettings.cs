@@ -59,7 +59,9 @@ internal sealed record UserSettings(
     internal PortalGeometry CreateGeometry() =>
         string.Equals(PortalMode, RectangleMode, StringComparison.OrdinalIgnoreCase)
             ? PortalGeometry.Rectangle(RectangleWidth, RectangleHeight, FeatherWidth)
-            : PortalGeometry.Circle(Radius);
+            : PortalGeometry.Circle(
+                checked(Radius + FeatherWidth),
+                FeatherWidth);
 
     private static string NormalizePortalMode(string? mode) =>
         string.Equals(mode, RectangleMode, StringComparison.OrdinalIgnoreCase)

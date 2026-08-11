@@ -9,14 +9,14 @@
     <AssemblyName>PierceView</AssemblyName>
     <RootNamespace>WindowPortal</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>2.1.0-alpha.2</Version>
+    <Version>2.1.0-alpha.3</Version>
     <AssemblyVersion>2.1.0.0</AssemblyVersion>
     <FileVersion>2.1.0.0</FileVersion>
-    <InformationalVersion>2.1.0-alpha.2</InformationalVersion>
+    <InformationalVersion>2.1.0-alpha.3</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>寸镜 / PierceView</Product>
     <Company>PierceView Project</Company>
-    <Description>单层圆形与圆角羽化矩形窗口透视托盘工具</Description>
+    <Description>单层羽化圆形与圆角矩形窗口透视托盘工具</Description>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
 

@@ -661,16 +661,21 @@ internal sealed class DwmPortalOverlay : IDisposable
 			{
 				var radius = geometry.Radius;
 				var radiusSquared = (long)radius * radius;
+				var circleFeatherWidth = geometry.EffectiveFeatherWidth;
 				for (var y = 0; y < geometry.FrameHeight; y++)
 				{
 					var dy = y - radius;
 					for (var x = 0; x < geometry.FrameWidth; x++)
 					{
 						var dx = x - radius;
-						mask[(y * geometry.FrameWidth) + x] =
-							((long)dx * dx) + ((long)dy * dy) > radiusSquared
+						var distanceSquared = ((long)dx * dx) + ((long)dy * dy);
+						mask[(y * geometry.FrameWidth) + x] = circleFeatherWidth <= 0
+							? distanceSquared > radiusSquared
 								? (byte)0
-								: byte.MaxValue;
+								: byte.MaxValue
+							: CreateFeatheredAlpha(
+								Math.Sqrt(distanceSquared) - radius,
+								circleFeatherWidth);
 					}
 				}
 
@@ -696,14 +701,14 @@ internal sealed class DwmPortalOverlay : IDisposable
 						Math.Min(Math.Max(qx, qy), 0d) -
 						cornerRadius;
 					mask[(y * geometry.FrameWidth) + x] =
-						CreateRoundedRectangleAlpha(signedDistance, featherWidth);
+						CreateFeatheredAlpha(signedDistance, featherWidth);
 				}
 			}
 
 			return mask;
 		}
 
-		private static byte CreateRoundedRectangleAlpha(
+		private static byte CreateFeatheredAlpha(
 			double signedDistance,
 			int featherWidth)
 		{

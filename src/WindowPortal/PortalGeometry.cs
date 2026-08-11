@@ -13,6 +13,8 @@ internal readonly record struct PortalGeometry(
     int Height,
     int FeatherWidth)
 {
+    private const int MaximumInteractionRadius = 32;
+
     internal int FrameWidth => Shape == PortalShape.Circle
         ? checked((Radius * 2) + 1)
         : Width;
@@ -23,12 +25,35 @@ internal readonly record struct PortalGeometry(
 
     internal int GuardRadius => Math.Max(FrameWidth, FrameHeight) / 2;
 
-    internal int EffectiveFeatherWidth => Shape == PortalShape.Rectangle
-        ? Math.Clamp(
-            FeatherWidth,
-            0,
-            Math.Min((FrameWidth - 1) / 2, (FrameHeight - 1) / 2))
+    internal int EffectiveFeatherWidth => Math.Clamp(
+        FeatherWidth,
+        0,
+        Shape == PortalShape.Circle
+            ? Math.Max(0, Radius - 1)
+            : Math.Min((FrameWidth - 1) / 2, (FrameHeight - 1) / 2));
+
+    internal int EffectiveHitRadius => Shape == PortalShape.Circle
+        ? Math.Max(1, Radius - EffectiveFeatherWidth)
         : 0;
+
+    /// <summary>
+    /// The visual portal is large, but mouse input only needs a small aperture around
+    /// the cursor. Keeping the physical window-region hole small prevents a stale
+    /// full-size circle/rectangle from flashing while the layered visual moves.
+    /// </summary>
+    internal int EffectiveInteractionRadius
+    {
+        get
+        {
+            var clearHalfExtent = Shape == PortalShape.Circle
+                ? EffectiveHitRadius
+                : Math.Max(
+                    1,
+                    (Math.Min(FrameWidth, FrameHeight) -
+                     (EffectiveFeatherWidth * 2)) / 2);
+            return Math.Clamp(clearHalfExtent, 1, MaximumInteractionRadius);
+        }
+    }
 
     internal int EffectiveCornerRadius
     {
@@ -52,8 +77,8 @@ internal readonly record struct PortalGeometry(
     internal int EffectiveHitCornerRadius =>
         Math.Max(0, EffectiveCornerRadius - EffectiveFeatherWidth);
 
-    internal static PortalGeometry Circle(int radius) =>
-        new(PortalShape.Circle, radius, 0, 0, 0);
+    internal static PortalGeometry Circle(int radius, int featherWidth = 0) =>
+        new(PortalShape.Circle, radius, 0, 0, featherWidth);
 
     internal static PortalGeometry Rectangle(int width, int height, int featherWidth = 0) =>
         new(PortalShape.Rectangle, 0, width, height, featherWidth);

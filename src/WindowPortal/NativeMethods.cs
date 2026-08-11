@@ -150,6 +150,10 @@ internal static class NativeMethods
 	[return: MarshalAs(UnmanagedType.Bool)]
 	internal static extern bool GetCursorPos(out Point point);
 
+	[DllImport("user32.dll", SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	internal static extern bool SetCursorPos(int x, int y);
+
 	[DllImport("user32.dll")]
 	internal static extern nint WindowFromPoint(Point point);
 

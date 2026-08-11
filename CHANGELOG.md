@@ -10,6 +10,25 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 - （暂无）
 
+## [2.1.0-alpha.3] - 2026-08-11
+
+### Added
+
+- 圆形新增与矩形共用的 0–80 像素边缘羽化。圆形半径继续表示完全清晰的内圆，羽化带只向外扩展；默认 `180 + 24` 像素视觉外半径不会缩小原清晰范围。
+- Circles now share the 0–80 px edge-feather setting with rectangles. The circle radius remains the fully clear inner area and feathering expands only outward; the default visual outer radius is `180 + 24` px without shrinking the original clear view.
+
+### Fixed
+
+- 将宿主窗口的物理穿透 Region 缩为鼠标中心附近的 32 像素交互孔，完整圆形/矩形继续由分层视觉窗绘制；降低两个系统窗口分步移动时旧位置短暂露出、形成双形状或轻微抖动的概率。
+- Reduce the host's physical pass-through Region to a 32 px input aperture around the pointer while the layered visual still draws the full circle/rectangle. This minimizes stale full-size shapes and slight jitter when the two native windows move in separate transactions.
+- 每帧先移动交互孔，再提交视觉帧，使真实点击、滚动和拖放命中更贴近当前鼠标位置。
+- Move the input aperture before presenting each visual frame so real click, scroll, and drag hit-testing stays closer to the current pointer position.
+
+### Tests
+
+- 视觉冒烟新增真实系统鼠标移动、后台文字/按钮/图像 Hover 重绘与六点内容坐标对齐；继续覆盖静止刷新、四种形状、羽化 alpha、黑帧和形状异常。
+- Visual smoke now moves the real system pointer, repaints background text/button/image hover states, and checks six-point content alignment while retaining stationary-refresh, four-shape, feather-alpha, black-frame, and shape-regression coverage.
+
 ## [2.1.0-alpha.2] - 2026-08-11
 
 ### Fixed

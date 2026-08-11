@@ -10,7 +10,7 @@
 
 PierceView is a lightweight Windows tray utility. Hold `F8` to open a selectable rounded feathered rectangle, rounded hard rectangle, or circle around the pointer, then view, scroll, or click the single window directly behind your current work. Release the key to restore the foreground window immediately.
 
-**公开版本 / Public release:** `1.0.6`　|　**本地开发版本 / Local development:** `2.1.0-alpha.2`
+**公开版本 / Public release:** `1.0.6`　|　**本地开发版本 / Local development:** `2.1.0-alpha.3`
 
 ## 为什么是寸镜 / Why PierceView
 
@@ -32,9 +32,9 @@ Many `Alt+Tab` trips are not real context switches—you only need a number, a s
 3. 在透视区域内查看、滚动或点击后方的一层普通窗口。View, scroll, or click the ordinary window directly behind it.
 4. 松开 `F8`，关闭透视并恢复当前窗口。Release `F8` to close the portal and restore the foreground.
 
-2.1 alpha 提供可调羽化的自动圆角矩形、圆角硬边矩形与 1.0 兼容圆形。所有形状仍使用同一个稳定的单层内核：一次 F8 会话只固定使用紧贴当前窗口后的一个视觉来源，不合成更深层窗口，也不动态切换来源。按住 F8 后即使鼠标不动，后台动态内容也会持续刷新。
+2.1 alpha 提供可调羽化的圆形、自动圆角矩形，以及把羽化设为 0 后的硬边外观。圆形设置值仍表示完整清晰区，羽化带只向外扩展，因此默认清晰范围不会缩小。所有形状仍使用同一个稳定的单层内核：一次 F8 会话只固定使用紧贴当前窗口后的一个视觉来源，不合成更深层窗口，也不动态切换来源。按住 F8 后即使鼠标不动，后台动态内容也会持续刷新。
 
-The 2.1 alpha adds adjustable feathering to an automatically rounded rectangle while retaining a rounded hard-edge option and the 1.0-compatible circle. Every shape keeps the stable single-layer core: each F8 session uses one fixed visual source directly behind the foreground and does not composite or switch to deeper layers. Dynamic background content keeps refreshing even when the pointer stays still.
+The 2.1 alpha adds adjustable feathering to both circles and automatically rounded rectangles; set feathering to 0 for a hard edge. The circle radius still defines the fully clear area, while feathering expands outward, so the default clear view does not shrink. Every shape keeps the stable single-layer core: each F8 session uses one fixed visual source directly behind the foreground and does not composite or switch to deeper layers. Dynamic background content keeps refreshing even when the pointer stays still.
 
 ## 下载 / Download
 
@@ -58,14 +58,14 @@ The current build is not Authenticode-signed, so Windows may show “Unknown pub
 3. 按住 `F8` 开启透视，松开恢复。Hold `F8` to open the portal; release it to restore.
 4. 双击托盘图标打开设置；右键可启动/暂停、查看帮助或退出。Double-click the tray icon for settings; right-click to start/pause, open Help, or exit.
 
-设置包含透视形状、圆形半径或矩形宽高、矩形边缘羽化，以及界面语言；配置保存在 `%LOCALAPPDATA%\PierceView\settings.json`。Settings include portal shape, circle radius or rectangle dimensions, rectangle edge feathering, and UI language; the configuration stays in that local file.
+设置包含透视形状、圆形清晰区半径或矩形宽高、圆形/矩形共用的边缘羽化，以及界面语言；配置保存在 `%LOCALAPPDATA%\PierceView\settings.json`。Settings include portal shape, clear circle radius or rectangle dimensions, shared circle/rectangle edge feathering, and UI language; the configuration stays in that local file.
 
 ## 能做什么 / Features
 
 | 能力 / Capability | 2.1 alpha 行为 / Version 2.1 alpha behavior |
 |---|---|
 | 系统托盘 / System tray | 普通启动无主窗口；提供启动/暂停、设置、帮助与退出。No persistent main window; Start/Pause, Settings, Help, and Exit live in the tray. |
-| 单层透视 / Single-layer portal | 可选圆角羽化/硬边矩形或 1.0 兼容圆形，显示紧贴当前窗口后的一层普通桌面窗口，并在鼠标静止时持续刷新。Choose a rounded feathered/hard rectangle or 1.0-compatible circle; dynamic content keeps refreshing while the pointer is still. |
+| 单层透视 / Single-layer portal | 可选羽化/硬边圆形或自动圆角矩形，显示紧贴当前窗口后的一层普通桌面窗口，并在鼠标静止时持续刷新。Choose a feathered/hard circle or automatically rounded rectangle; dynamic content keeps refreshing while the pointer is still. |
 | 后台交互 / Background interaction | 允许真实滚动与点击，并尽量保持宿主窗口前台与层级。Passes real scroll/click input while preserving the host foreground and Z-order where Windows allows it. |
 | 跨应用拖放 / Cross-app drag-and-drop | 两端应用与权限都兼容时可用；并非所有文字、图片、文件或网页都支持。Works when both apps and privilege levels support the same native drag format. |
 | 双语界面 / Bilingual UI | 托盘、设置、首次提示与帮助支持简体中文和 English。Tray, Settings, first-run hint, and Help support Simplified Chinese and English. |
@@ -93,8 +93,8 @@ PierceView runs at standard-user privilege. It does not inject into processes, r
 
 ## 已知限制 / Known limitations
 
-- 圆形边缘可能有轻微阶梯感；个别 GPU/驱动或来源窗口偶发短暂黑帧或闪烁。The circular edge may show mild stair-stepping; some GPU/driver or source-window combinations may briefly black-frame or flicker.
-- 圆角矩形羽化是沿圆角轮廓的 alpha 渐变，不会模糊后台内容本身；设为 0 即为保留圆角的硬边。Rounded-rectangle feathering is an alpha transition along the rounded contour, not a blur of the background content; 0 keeps a rounded hard edge.
+- 羽化可明显减轻圆形硬边的阶梯感；个别 GPU/驱动或来源窗口仍可能偶发短暂黑帧或闪烁。Feathering reduces hard-circle stair-stepping; some GPU/driver or source-window combinations may still briefly black-frame or flicker.
+- 圆形使用径向 alpha 羽化，矩形沿自动圆角轮廓羽化；两者都不会模糊后台内容本身，设为 0 即恢复硬边。Circles use radial alpha feathering and rectangles follow their automatic rounded contour; neither blurs the background content itself, and 0 restores a hard edge.
 - 部分无重定向、受保护或特殊 GPU 表面可能只有点击、没有画面。Some no-redirection, protected, or special GPU surfaces may accept clicks without a visual.
 - 跨应用拖放依赖两端应用的原生格式与权限，并非所有场景可用。Cross-app drag-and-drop depends on native formats and privilege levels; not every app pair supports it.
 - 发布包尚未代码签名，首次运行可能被 SmartScreen 提示。The release is not code-signed; SmartScreen may prompt on first run.

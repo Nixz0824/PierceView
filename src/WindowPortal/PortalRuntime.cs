@@ -106,18 +106,21 @@ internal sealed class PortalRuntime : IDisposable
                     }
                     else if (visualOverlay.IsVisible)
                     {
-                        if (!visualOverlay.TryUpdate(cursor, out var visualError))
+                        // Move the small input aperture first, then submit the visual frame.
+                        // This keeps hit-testing centered on the real cursor and prevents a
+                        // full-size stale Region from becoming a second visible portal.
+                        if (!controller.Update(cursor, out var regionError))
+                        {
+                            visualOverlay.Hide();
+                            ErrorOccurred?.Invoke(regionError ?? "无法移动透视区域。");
+                        }
+                        else if (!visualOverlay.TryUpdate(cursor, out var visualError))
                         {
                             if (!visualWarningShown)
                             {
                                 ErrorOccurred?.Invoke(visualError ?? "视觉来源暂不可用。");
                                 visualWarningShown = true;
                             }
-                        }
-                        else if (!controller.Update(cursor, out var regionError))
-                        {
-                            visualOverlay.Hide();
-                            ErrorOccurred?.Invoke(regionError ?? "无法移动透视区域。");
                         }
                     }
                     else if (!controller.Update(cursor, out var regionError))

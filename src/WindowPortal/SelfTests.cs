@@ -48,12 +48,21 @@ internal static class SelfTests
         {
             var center = new NativeMethods.Point(500, 400);
             var circle = PortalGeometry.Circle(180);
+            var featheredCircle = PortalGeometry.Circle(204, 24);
             var rectangle = PortalGeometry.Rectangle(420, 280);
             var featheredRectangle = PortalGeometry.Rectangle(420, 280, 24);
             return circle.CreateFrameBounds(center) ==
                        new NativeMethods.Rect(320, 220, 681, 581) &&
                    circle.CreateHitBounds(center) ==
                        new NativeMethods.Rect(320, 220, 681, 581) &&
+                   circle.EffectiveHitRadius == 180 &&
+                   circle.EffectiveInteractionRadius == 32 &&
+                   featheredCircle.CreateFrameBounds(center) ==
+                       new NativeMethods.Rect(296, 196, 705, 605) &&
+                   featheredCircle.CreateHitBounds(center) ==
+                       new NativeMethods.Rect(320, 220, 681, 581) &&
+                   featheredCircle.EffectiveHitRadius == 180 &&
+                   featheredCircle.EffectiveInteractionRadius == 32 &&
                    rectangle.CreateFrameBounds(center) ==
                        new NativeMethods.Rect(290, 260, 710, 540) &&
                    rectangle.CreateHitBounds(center) ==
@@ -65,21 +74,23 @@ internal static class SelfTests
                    featheredRectangle.CreateHitBounds(center) ==
                        new NativeMethods.Rect(314, 284, 686, 516) &&
                    featheredRectangle.EffectiveCornerRadius == 46 &&
-                   featheredRectangle.EffectiveHitCornerRadius == 22;
+                   featheredRectangle.EffectiveHitCornerRadius == 22 &&
+                   rectangle.EffectiveInteractionRadius == 32 &&
+                   featheredRectangle.EffectiveInteractionRadius == 32;
         }, failures, ref total);
 
-        Check("圆角矩形物理命中区域", () =>
+        Check("鼠标中心小型交互孔", () =>
         {
             var geometry = PortalGeometry.Rectangle(420, 280, 24);
-            var bounds = geometry.CreateHitBounds(new NativeMethods.Point(210, 140));
-            var diameter = geometry.EffectiveHitCornerRadius * 2;
-            var region = NativeMethods.CreateRoundRectRgn(
+            var center = new NativeMethods.Point(210, 140);
+            var bounds = WindowRegionController.CreateHoleBounds(
+                center,
+                geometry.EffectiveInteractionRadius);
+            var region = NativeMethods.CreateEllipticRgn(
                 bounds.Left,
                 bounds.Top,
                 bounds.Right,
-                bounds.Bottom,
-                diameter,
-                diameter);
+                bounds.Bottom);
             if (region == nint.Zero)
             {
                 return false;
@@ -87,12 +98,15 @@ internal static class SelfTests
 
             try
             {
-                return NativeMethods.PtInRegion(region, 210, 140) &&
-                       !NativeMethods.PtInRegion(region, bounds.Left, bounds.Top) &&
+                return NativeMethods.PtInRegion(region, center.X, center.Y) &&
                        NativeMethods.PtInRegion(
                            region,
-                           bounds.Left + geometry.EffectiveHitCornerRadius,
-                           bounds.Top + geometry.EffectiveHitCornerRadius);
+                           center.X + geometry.EffectiveInteractionRadius - 2,
+                           center.Y) &&
+                       !NativeMethods.PtInRegion(
+                           region,
+                           center.X + geometry.EffectiveInteractionRadius + 2,
+                           center.Y);
             }
             finally
             {
@@ -132,7 +146,7 @@ internal static class SelfTests
             var migrated = store.Load();
             return migrated.PortalMode == UserSettings.CircleMode &&
                    migrated.FeatherWidth == UserSettings.DefaultFeatherWidth &&
-                   migrated.CreateGeometry() == PortalGeometry.Circle(230);
+                   migrated.CreateGeometry() == PortalGeometry.Circle(254, 24);
         }), failures, ref total);
 
         Check("2.0 矩形设置获得默认羽化", () => WithTemporaryStore((store, path) =>

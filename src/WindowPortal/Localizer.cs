@@ -56,14 +56,14 @@ internal sealed record UiText(
     internal static UiText Chinese { get; } = new(
         "寸镜 / PierceView 设置",
         "透视形状",
-        "圆形（1.0 兼容）",
+        "圆形",
         "圆角矩形",
-        "透视圆半径",
-        "范围 64–400 像素，建议保持 180。",
+        "圆形清晰区半径",
+        "清晰区 64–400 像素；羽化带向外扩展，默认 180。",
         "矩形尺寸",
         "宽 160–1000，高 120–800 像素。",
         "边缘羽化",
-        "0 为硬边；始终保留自动圆角。最大 80 像素，较小矩形会自动限制。",
+        "圆形和矩形共用；0 为硬边，最大 80 像素。矩形始终保留自动圆角。",
         "界面语言",
         "简体中文",
         "English",
@@ -82,7 +82,7 @@ internal sealed record UiText(
         "按住 F8：不用来回 Alt+Tab，直接查看、滚动或点击当前窗口后面的一层普通应用。\n" +
         "松开 F8：立即关闭透视并恢复当前窗口。\n\n" +
         "在支持 Windows 原生拖放的应用中，可以从后台选中文字、图片或文件并保持拖动，松开 F8 后把它拖到当前应用的合适位置再放手。是否可复制取决于两端应用的拖放支持。\n\n" +
-        "当前版本只支持紧贴当前窗口后方的一层。可在设置中选择自动圆角矩形并调整边缘羽化，或继续使用 1.0 兼容圆形。羽化只作用于矩形外观，鼠标中心仍位于完全穿透区域。游戏、反作弊、受保护视频、系统界面和无重定向窗口可能只有点击、没有画面。启动游戏前请从托盘完全退出寸镜。",
+        "当前版本只支持紧贴当前窗口后方的一层。圆形和自动圆角矩形都支持边缘羽化；羽化带向清晰区外侧扩展，鼠标中心仍位于完全穿透区域。把羽化设为 0 可恢复硬边。游戏、反作弊、受保护视频、系统界面和无重定向窗口可能只有点击、没有画面。启动游戏前请从托盘完全退出寸镜。",
         "暂时无法透视",
         "请确认鼠标下方存在普通桌面应用，并避开游戏、受保护内容和系统界面。",
         "寸镜 / PierceView 已经在运行。请从系统托盘打开设置。",
@@ -91,14 +91,14 @@ internal sealed record UiText(
     internal static UiText English { get; } = new(
         "PierceView Settings",
         "Portal shape",
-        "Circle (1.0 compatible)",
+        "Circle",
         "Rounded rectangle",
-        "Portal radius",
-        "64–400 pixels. 180 is recommended.",
+        "Clear circle radius",
+        "Clear area 64–400 px; feathering expands outward. Default: 180.",
         "Rectangle size",
         "Width 160–1000, height 120–800 pixels.",
         "Edge feather",
-        "0 is hard-edged; automatic rounded corners remain. Up to 80 px; smaller rectangles limit it automatically.",
+        "Shared by circle and rectangle; 0 is hard-edged, up to 80 px. Rectangles remain automatically rounded.",
         "Language",
         "简体中文",
         "English",
@@ -117,7 +117,7 @@ internal sealed record UiText(
         "Hold F8: skip repetitive Alt+Tab switching and directly view, scroll, or click one ordinary app behind the current window.\n" +
         "Release F8: close the portal and restore the current window immediately.\n\n" +
         "When both apps support native Windows drag-and-drop, you can start dragging text, an image, or a file in the background app, release F8, then drop it into the current app. Actual copy behavior depends on both apps.\n\n" +
-        "The current version supports only the layer directly behind the current window. Choose the automatically rounded rectangle and adjust edge feathering in Settings, or keep the 1.0-compatible circle. Feathering changes only the rectangular appearance; the pointer center remains inside the fully open hit area. Games, anti-cheat software, protected video, system UI, and no-redirection windows may accept clicks without showing an image. Fully exit PierceView before starting a game.",
+        "The current version supports only the layer directly behind the current window. Both circles and automatically rounded rectangles support edge feathering. The feather band expands outside the clear area, keeping the pointer center fully open. Set feathering to 0 for a hard edge. Games, anti-cheat software, protected video, system UI, and no-redirection windows may accept clicks without showing an image. Fully exit PierceView before starting a game.",
         "Portal unavailable",
         "Make sure a standard desktop app is under the cursor. Avoid games, protected content, and system UI.",
         "PierceView is already running. Open it from the system tray.",

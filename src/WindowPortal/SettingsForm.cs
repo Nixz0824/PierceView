@@ -285,17 +285,22 @@ internal sealed class SettingsForm : Form
         _rectangleSizeHint.Enabled = rectangle;
         _rectangleWidthInput.Enabled = rectangle;
         _rectangleHeightInput.Enabled = rectangle;
-        _featherWidthLabel.Enabled = rectangle;
-        _featherWidthHint.Enabled = rectangle;
-        _featherWidthInput.Enabled = rectangle;
+        _featherWidthLabel.Enabled = true;
+        _featherWidthHint.Enabled = true;
+        _featherWidthInput.Enabled = true;
+        UpdateFeatherMaximum();
     }
 
     private void UpdateFeatherMaximum()
     {
-        var geometryLimit = Math.Min(
-            (decimal.ToInt32(_rectangleWidthInput.Value) - 1) / 2,
-            (decimal.ToInt32(_rectangleHeightInput.Value) - 1) / 2);
-        var maximum = Math.Min(UserSettings.MaximumFeatherWidth, geometryLimit);
+        var maximum = UserSettings.MaximumFeatherWidth;
+        if (PortalMode == UserSettings.RectangleMode)
+        {
+            var geometryLimit = Math.Min(
+                (decimal.ToInt32(_rectangleWidthInput.Value) - 1) / 2,
+                (decimal.ToInt32(_rectangleHeightInput.Value) - 1) / 2);
+            maximum = Math.Min(maximum, geometryLimit);
+        }
         if (_featherWidthInput.Value > maximum)
         {
             _featherWidthInput.Value = maximum;

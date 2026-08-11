@@ -278,30 +278,15 @@ internal sealed class WindowRegionController : IDisposable
 	private bool ApplyHole(nint window, NativeMethods.Rect windowRect, NativeMethods.Point screenPoint, out string? error)
 	{
 		var center = ToWindowCoordinates(windowRect, screenPoint);
-		NativeMethods.Rect rect = _geometry.Shape == PortalShape.Circle
-			? CreateHoleBounds(center, _geometry.Radius)
-			: _geometry.CreateHitBounds(center);
+		// 视觉形状由独立的分层窗完整绘制。窗口 Region 只保留鼠标中心附近的
+		// 小型交互孔，避免两个系统窗口换位不同步时短暂露出第二个圆/矩形。
+		var rect = CreateHoleBounds(center, _geometry.EffectiveInteractionRadius);
 		nint num = NativeMethods.CreateRectRgn(0, 0, windowRect.Width, windowRect.Height);
-		nint num2;
-		if (_geometry.Shape == PortalShape.Circle)
-		{
-			num2 = NativeMethods.CreateEllipticRgn(rect.Left, rect.Top, rect.Right, rect.Bottom);
-		}
-		else if (_geometry.EffectiveHitCornerRadius > 0)
-		{
-			var cornerDiameter = checked(_geometry.EffectiveHitCornerRadius * 2);
-			num2 = NativeMethods.CreateRoundRectRgn(
-				rect.Left,
-				rect.Top,
-				rect.Right,
-				rect.Bottom,
-				cornerDiameter,
-				cornerDiameter);
-		}
-		else
-		{
-			num2 = NativeMethods.CreateRectRgn(rect.Left, rect.Top, rect.Right, rect.Bottom);
-		}
+		nint num2 = NativeMethods.CreateEllipticRgn(
+			rect.Left,
+			rect.Top,
+			rect.Right,
+			rect.Bottom);
 		if (num == IntPtr.Zero || num2 == IntPtr.Zero)
 		{
 			DeleteIfOwned(num);
