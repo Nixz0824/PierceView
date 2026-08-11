@@ -18,6 +18,7 @@ namespace WindowPortal;
 internal sealed class DwmPortalOverlay : IDisposable
 {
 	internal const int StableCanvasMargin = 96;
+	private const int CaptureIntervalMilliseconds = 8;
 
 	internal static void ApplyPremultipliedAlphaForTesting(
 		Bitmap frame,
@@ -63,6 +64,10 @@ internal sealed class DwmPortalOverlay : IDisposable
 		internal int DisplayRelocationCount => _display?.RelocationCount ?? 0;
 
 		internal int CachedPresentationCount { get; private set; }
+
+		internal int DisplayPresentationCount => _display?.PresentationCount ?? 0;
+
+		internal NativeMethods.Point? LastPresentedCenter => _lastPresentedCenter;
 
 		internal PortalOverlayManager(
 			PortalGeometry geometry,
@@ -206,31 +211,6 @@ internal sealed class DwmPortalOverlay : IDisposable
 				targetCenter = latestCenter;
 			}
 
-			// 鼠标仍在当前安全画布内时，先用上一张原始抓帧立即重绘形状。
-			// 这样鼠标移动不必先等待 PrintWindow，视觉位置与物理交互孔更接近同一时刻。
-			if (_capture.TryGetCachedFrame(
-				    sourceWindowRect,
-				    targetCenter,
-				    out var cachedFrame,
-				    out var cachedCanvasBounds,
-				    out var cachedPortalOffset) &&
-			    _lastPresentedCenter != targetCenter)
-			{
-				if (!_display.TryPresent(
-					    cachedFrame,
-					    cachedPortalOffset.X,
-					    cachedPortalOffset.Y,
-					    cachedCanvasBounds.Left,
-					    cachedCanvasBounds.Top,
-					    out error))
-				{
-					return false;
-				}
-
-				_lastPresentedCenter = targetCenter;
-				CachedPresentationCount++;
-			}
-
 			if (!_capture.TryUpdateSource(sourceWindowRect, targetCenter, out error))
 			{
 				return false;
@@ -244,15 +224,44 @@ internal sealed class DwmPortalOverlay : IDisposable
 				_firstFrameFlushed = true;
 			}
 
-			// 鼠标移动可复用缓存画布快速重绘；后台内容抓取维持约 60Hz。
-			// 发生画布重定位或首次显示时仍立即抓取，不能沿用旧坐标映射。
+			// 每次运行循环只向分层窗提交一次画面。若本轮需要抓取新内容，直接等待
+			// PrintWindow 完成并提交 late-latch 后的新帧，不能先显示一张缓存旧帧，
+			// 否则高刷新率屏幕会把两次提交显示成一两帧旧画面。
 			var captureElapsed = _lastCaptureTimestamp == 0
 				? TimeSpan.MaxValue
 				: Stopwatch.GetElapsedTime(_lastCaptureTimestamp);
 			if (_capture.HasCapturedFrame &&
 			    !_capture.SourceMappingChanged &&
-			    captureElapsed < TimeSpan.FromMilliseconds(16))
+			    captureElapsed < TimeSpan.FromMilliseconds(CaptureIntervalMilliseconds))
 			{
+				if (_lastPresentedCenter != targetCenter)
+				{
+					if (!_capture.TryGetCachedFrame(
+						    sourceWindowRect,
+						    targetCenter,
+						    out var cachedFrame,
+						    out var cachedCanvasBounds,
+						    out var cachedPortalOffset))
+					{
+						error = "缓存画布无法与当前鼠标位置对齐。";
+						return false;
+					}
+
+					if (!_display.TryPresent(
+						    cachedFrame,
+						    cachedPortalOffset.X,
+						    cachedPortalOffset.Y,
+						    cachedCanvasBounds.Left,
+						    cachedCanvasBounds.Top,
+						    out error))
+					{
+						return false;
+					}
+
+					_lastPresentedCenter = targetCenter;
+					CachedPresentationCount++;
+				}
+
 				if (_enableForegroundGuard &&
 				    _lastPresentedCenter is { } cachedCenter &&
 				    cachedCenter != screenCenter)
@@ -758,6 +767,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		internal int RelocationCount { get; private set; }
 
+		internal int PresentationCount { get; private set; }
+
 		protected override bool ShowWithoutActivation => true;
 
 		protected override CreateParams CreateParams
@@ -845,6 +856,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 				error = "UpdateLayeredWindow 失败：" + new Win32Exception(Marshal.GetLastWin32Error()).Message;
 				return false;
 			}
+
+			PresentationCount++;
 
 			if (_lastLeft != left || _lastTop != top)
 			{
@@ -1344,6 +1357,10 @@ internal sealed class DwmPortalOverlay : IDisposable
 	internal int DisplayRelocationCount => Invoke(static manager => manager.DisplayRelocationCount);
 
 	internal int CachedPresentationCount => Invoke(static manager => manager.CachedPresentationCount);
+
+	internal int DisplayPresentationCount => Invoke(static manager => manager.DisplayPresentationCount);
+
+	internal NativeMethods.Point? LastPresentedCenter => Invoke(static manager => manager.LastPresentedCenter);
 
 	internal DwmPortalOverlay(int radius)
 		: this(

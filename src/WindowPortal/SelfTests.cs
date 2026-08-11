@@ -56,13 +56,13 @@ internal static class SelfTests
                    circle.CreateHitBounds(center) ==
                        new NativeMethods.Rect(320, 220, 681, 581) &&
                    circle.EffectiveHitRadius == 180 &&
-                   circle.EffectiveInteractionRadius == 32 &&
+                   circle.EffectiveInteractionRadius == 4 &&
                    featheredCircle.CreateFrameBounds(center) ==
                        new NativeMethods.Rect(296, 196, 705, 605) &&
                    featheredCircle.CreateHitBounds(center) ==
                        new NativeMethods.Rect(320, 220, 681, 581) &&
                    featheredCircle.EffectiveHitRadius == 180 &&
-                   featheredCircle.EffectiveInteractionRadius == 32 &&
+                   featheredCircle.EffectiveInteractionRadius == 4 &&
                    rectangle.CreateFrameBounds(center) ==
                        new NativeMethods.Rect(290, 260, 710, 540) &&
                    rectangle.CreateHitBounds(center) ==
@@ -75,11 +75,11 @@ internal static class SelfTests
                        new NativeMethods.Rect(314, 284, 686, 516) &&
                    featheredRectangle.EffectiveCornerRadius == 46 &&
                    featheredRectangle.EffectiveHitCornerRadius == 22 &&
-                   rectangle.EffectiveInteractionRadius == 32 &&
-                   featheredRectangle.EffectiveInteractionRadius == 32;
+                   rectangle.EffectiveInteractionRadius == 4 &&
+                   featheredRectangle.EffectiveInteractionRadius == 4;
         }, failures, ref total);
 
-        Check("鼠标中心小型交互孔", () =>
+        Check("鼠标中心四像素交互孔", () =>
         {
             var geometry = PortalGeometry.Rectangle(420, 280, 24);
             var center = new NativeMethods.Point(210, 140);

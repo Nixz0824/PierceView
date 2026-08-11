@@ -13,7 +13,10 @@ internal readonly record struct PortalGeometry(
     int Height,
     int FeatherWidth)
 {
-    private const int MaximumInteractionRadius = 32;
+    // The pointer itself is always at the portal center. A four-pixel aperture is
+    // enough for native hit-testing while keeping the independently composited
+    // physical hole too small to become a visible second portal during hand-off.
+    private const int MaximumInteractionRadius = 4;
 
     internal int FrameWidth => Shape == PortalShape.Circle
         ? checked((Radius * 2) + 1)

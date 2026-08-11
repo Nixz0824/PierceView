@@ -10,6 +10,25 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 - （暂无）
 
+## [2.1.0-cpu-alpha.3] - 2026-08-11
+
+### Fixed
+
+- 修复 CPU late-latch 视觉坐标与物理交互孔仍可能相差一个抓帧周期的问题：视觉层先完成提交，再把实际提交的最终坐标同步给交互孔，避免旧孔在当前位置附近短暂露出。
+- Fix the CPU late-latch visual center and physical input aperture drifting by one capture interval. The visual layer now commits first and hands its actual final center to the aperture, preventing the old hole from briefly appearing near the current position.
+- 每次运行循环只提交一张分层画面；需要新抓帧时不再先提交缓存旧帧再提交新帧，减少高刷新率屏幕上透视窗内部一两帧陈旧画面的闪现。
+- Submit only one layered frame per runtime tick. When a fresh capture is due, do not present a cached stale frame immediately before the new one, reducing one- or two-frame stale flashes inside the portal on high-refresh displays.
+
+### Performance
+
+- CPU 内容抓取目标从约 60Hz 提高到约 120Hz；4ms 形状跟随节奏不变。物理交互孔半径从 32 像素缩至 4 像素，鼠标中心仍保留原生点击、滚动与拖放命中，同时显著缩小独立物理孔可能产生的可见面积。
+- Raise the CPU content-capture target from roughly 60Hz to roughly 120Hz while retaining the 4ms shape-follow cadence. Reduce the physical input-aperture radius from 32 px to 4 px so native click, scroll, and drag hit-testing remains at the pointer center while the independently visible physical area becomes much smaller.
+
+### Tests
+
+- 视觉冒烟新增“最终提交坐标等于 late-latch 鼠标坐标”及“单次更新只发生一次 `UpdateLayeredWindow` 提交”断言，并把旧位置恢复采样改到物理孔圆心。
+- Add visual-smoke assertions that the committed center equals the late-latched pointer and that one update performs exactly one `UpdateLayeredWindow` presentation; move stale-position sampling to the physical aperture center.
+
 ## [2.1.0-cpu-alpha.2] - 2026-08-11
 
 ### Fixed

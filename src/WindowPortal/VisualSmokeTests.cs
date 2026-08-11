@@ -363,11 +363,15 @@ internal static class VisualSmokeTests
 			}
 
 			_ = NativeMethods.SetCursorPos(latestCenter.X, latestCenter.Y);
+			Thread.Sleep(20);
+			var presentationsBeforeUpdate = overlay.DisplayPresentationCount;
 			if (!overlay.TryUpdate(requestedCenter, out var updateError))
 			{
 				failures.Add("延迟锁定测试无法更新透视：" + updateError);
 				return;
 			}
+			var presentationsAfterUpdate = overlay.DisplayPresentationCount;
+			var committedCenter = overlay.LastPresentedCenter;
 
 			Application.DoEvents();
 			Thread.Sleep(20);
@@ -395,11 +399,26 @@ internal static class VisualSmokeTests
 			}
 
 			Console.WriteLine(
-				$"提交前鼠标延迟锁定：偏移=56px，边缘采样异常={mismatches}/{sampleOffsetsY.Length}。");
+				$"提交前鼠标延迟锁定：偏移=56px，边缘采样异常={mismatches}/{sampleOffsetsY.Length}，" +
+				$"最终坐标一致={committedCenter == latestCenter}，" +
+				$"本轮提交={presentationsAfterUpdate - presentationsBeforeUpdate}。");
 			if (mismatches > 0)
 			{
 				failures.Add(
 					$"提交前未使用最新鼠标位置：边缘采样异常 {mismatches}/{sampleOffsetsY.Length}。");
+			}
+
+			if (committedCenter != latestCenter)
+			{
+				failures.Add(
+					$"视觉层未公开实际提交坐标：expected={latestCenter}, actual={committedCenter}。");
+			}
+
+			if (presentationsAfterUpdate - presentationsBeforeUpdate != 1)
+			{
+				failures.Add(
+					$"一次更新发生多次分层窗提交：" +
+					$"{presentationsBeforeUpdate}->{presentationsAfterUpdate}。");
 			}
 		}
 		finally
@@ -467,6 +486,8 @@ internal static class VisualSmokeTests
 			var mismatchedFrames = 0;
 			var mismatchedSamples = 0;
 			var samples = 0;
+			var successfulUpdates = 0;
+			var presentationsBeforeMotion = overlay.DisplayPresentationCount;
 			const int frameCount = 64;
 			var sampleOffsets = new[]
 			{
@@ -504,6 +525,7 @@ internal static class VisualSmokeTests
 					failures.Add("真实鼠标 Hover 对齐更新失败：" + updateError);
 					break;
 				}
+				successfulUpdates++;
 
 				Application.DoEvents();
 				Thread.Sleep(12);
@@ -541,11 +563,13 @@ internal static class VisualSmokeTests
 			var sourceUpdates = overlay.CaptureSourceUpdateCount;
 			var displayRelocations = overlay.DisplayRelocationCount;
 			var cachedPresentations = overlay.CachedPresentationCount;
+			var presentationsDuringMotion =
+				overlay.DisplayPresentationCount - presentationsBeforeMotion;
 			Console.WriteLine(
 				$"真实鼠标 Hover 对齐：异常帧={mismatchedFrames}/{frameCount}，" +
 				$"异常采样={mismatchedSamples}/{samples}，Hover 重绘={back.HoverRepaintCount}，" +
 				$"DWM 来源重定位={sourceUpdates}，显示画布重定位={displayRelocations}，" +
-				$"缓存即时提交={cachedPresentations}。");
+				$"缓存即时提交={cachedPresentations}，单轮提交={presentationsDuringMotion}/{successfulUpdates}。");
 			if (back.HoverRepaintCount < 4)
 			{
 				failures.Add("后台 Hover 重绘次数不足，测试场景无效。");
@@ -571,9 +595,11 @@ internal static class VisualSmokeTests
 					$"显示画布 {displayRelocations} 次。");
 			}
 
-			if (cachedPresentations < frameCount / 2)
+			if (presentationsDuringMotion != successfulUpdates)
 			{
-				failures.Add($"缓存画布即时跟随次数不足：{cachedPresentations}/{frameCount}。");
+				failures.Add(
+					$"真实鼠标更新未保持每轮一次提交：" +
+					$"{presentationsDuringMotion}/{successfulUpdates}。");
 			}
 		}
 		finally
@@ -625,6 +651,8 @@ internal static class VisualSmokeTests
 		Application.DoEvents();
 		var mismatches = 0;
 		var samples = 0;
+		var successfulUpdates = 0;
+		var presentationsBeforeMotion = overlay.DisplayPresentationCount;
 		const int frameCount = 64;
 		for (var frame = 0; frame < frameCount; frame++)
 		{
@@ -638,6 +666,7 @@ internal static class VisualSmokeTests
 				failures.Add("高对比内容对齐更新失败：" + updateError);
 				break;
 			}
+			successfulUpdates++;
 
 			Application.DoEvents();
 			using var shot = CaptureScreenRect(point.X, point.Y, 1, 1);
@@ -655,6 +684,8 @@ internal static class VisualSmokeTests
 		var sourceUpdates = overlay.CaptureSourceUpdateCount;
 		var displayRelocations = overlay.DisplayRelocationCount;
 		var cachedPresentations = overlay.CachedPresentationCount;
+		var presentationsDuringMotion =
+			overlay.DisplayPresentationCount - presentationsBeforeMotion;
 		overlay.Hide();
 		front.Close();
 		back.Close();
@@ -662,7 +693,7 @@ internal static class VisualSmokeTests
 		Console.WriteLine(
 			$"高对比内容坐标对齐：错位帧={mismatches}/{samples}，" +
 			$"DWM 来源重定位={sourceUpdates}，显示画布重定位={displayRelocations}，" +
-			$"缓存即时提交={cachedPresentations}。");
+			$"缓存即时提交={cachedPresentations}，单轮提交={presentationsDuringMotion}/{successfulUpdates}。");
 		if (samples < frameCount / 2 || mismatches > Math.Max(2, samples / 16))
 		{
 			failures.Add($"高对比文字/图像区域错位帧过多：{mismatches}/{samples}。");
@@ -678,9 +709,11 @@ internal static class VisualSmokeTests
 			failures.Add($"安全边界内移动仍重复移动显示画布：{displayRelocations} 次。");
 		}
 
-		if (cachedPresentations < frameCount / 2)
+		if (presentationsDuringMotion != successfulUpdates)
 		{
-			failures.Add($"安全画布缓存即时跟随次数不足：{cachedPresentations}/{frameCount}。");
+			failures.Add(
+				$"高对比移动未保持每轮一次提交：" +
+				$"{presentationsDuringMotion}/{successfulUpdates}。");
 		}
 	}
 
@@ -731,26 +764,30 @@ internal static class VisualSmokeTests
 		Application.DoEvents();
 		Thread.Sleep(20);
 		var relocationsBeforeMove = overlay.DisplayRelocationCount;
-		if (!TryApplyTestHole(front, moved, geometry, out var moveHoleError))
-		{
-			failures.Add("稳定画布残留测试无法移动交互孔：" + moveHoleError);
-			return;
-		}
-
+		var presentationsBeforeMove = overlay.DisplayPresentationCount;
 		if (!overlay.TryUpdate(moved, out var updateError))
 		{
 			failures.Add("稳定画布残留测试无法移动透视：" + updateError);
 			return;
 		}
 
+		// Match production ordering: commit the visual frame first, then hand the
+		// committed center to the physical input aperture.
+		if (!TryApplyTestHole(front, moved, geometry, out var moveHoleError))
+		{
+			failures.Add("稳定画布残留测试无法移动交互孔：" + moveHoleError);
+			return;
+		}
+
 		Application.DoEvents();
 		Thread.Sleep(12);
-		using var oldShot = CaptureScreenRect(origin.X - 20, origin.Y, 1, 1);
+		using var oldShot = CaptureScreenRect(origin.X, origin.Y, 1, 1);
 		using var newShot = CaptureScreenRect(moved.X, moved.Y, 1, 1);
 		var oldPixel = oldShot.GetPixel(0, 0);
 		var newPixel = newShot.GetPixel(0, 0);
 		var relocationsAfterMove = overlay.DisplayRelocationCount;
 		var cachedPresentations = overlay.CachedPresentationCount;
+		var presentationsAfterMove = overlay.DisplayPresentationCount;
 		var oldCleared = ColorDistance(oldPixel, frontColor) + 400 <
 		                 ColorDistance(oldPixel, backColor);
 		var newVisible = ColorDistance(newPixel, backColor) + 400 <
@@ -758,7 +795,8 @@ internal static class VisualSmokeTests
 		Console.WriteLine(
 			$"CPU 稳定画布残留：旧位置已清除={oldCleared}，新位置可见={newVisible}，" +
 			$"显示画布重定位={relocationsBeforeMove}->{relocationsAfterMove}，" +
-			$"缓存即时提交={cachedPresentations}。");
+			$"缓存即时提交={cachedPresentations}，" +
+			$"本轮提交={presentationsAfterMove - presentationsBeforeMove}。");
 
 		if (!oldCleared || !newVisible)
 		{
@@ -773,9 +811,11 @@ internal static class VisualSmokeTests
 				$"{relocationsBeforeMove}->{relocationsAfterMove}。");
 		}
 
-		if (cachedPresentations < 1)
+		if (presentationsAfterMove - presentationsBeforeMove != 1)
 		{
-			failures.Add("安全边界内移动没有使用缓存帧即时提交。");
+			failures.Add(
+				$"稳定画布移动未保持单轮一次提交：" +
+				$"{presentationsBeforeMove}->{presentationsAfterMove}。");
 		}
 	}
 

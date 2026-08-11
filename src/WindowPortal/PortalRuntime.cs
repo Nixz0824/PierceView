@@ -110,20 +110,24 @@ internal sealed class PortalRuntime : IDisposable
                     }
                     else if (visualOverlay.IsVisible)
                     {
-                        // Move the small input aperture first, then submit the visual frame.
-                        // This keeps hit-testing centered on the real cursor and prevents a
-                        // full-size stale Region from becoming a second visible portal.
-                        if (!controller.Update(cursor, out var regionError))
-                        {
-                            visualOverlay.Hide();
-                            ErrorOccurred?.Invoke(regionError ?? "无法移动透视区域。");
-                        }
-                        else if (!visualOverlay.TryUpdate(cursor, out var visualError))
+                        // 视觉层会在 PrintWindow 结束后 late-latch 到更新的鼠标坐标。
+                        // 先完成唯一一次视觉提交，再把它实际提交的坐标交给物理交互孔，
+                        // 避免两者分别停在抓帧前/后的两个位置。
+                        if (!visualOverlay.TryUpdate(cursor, out var visualError))
                         {
                             if (!visualWarningShown)
                             {
                                 ErrorOccurred?.Invoke(visualError ?? "视觉来源暂不可用。");
                                 visualWarningShown = true;
+                            }
+                        }
+                        else
+                        {
+                            var committedCenter = visualOverlay.LastPresentedCenter ?? cursor;
+                            if (!controller.Update(committedCenter, out var regionError))
+                            {
+                                visualOverlay.Hide();
+                                ErrorOccurred?.Invoke(regionError ?? "无法移动透视区域。");
                             }
                         }
                     }
@@ -136,11 +140,22 @@ internal sealed class PortalRuntime : IDisposable
                                  controller,
                                  visualOverlay,
                                  cursor,
-                                 out var visualError) &&
-                             !visualWarningShown)
+                                 out var visualError))
                     {
-                        ErrorOccurred?.Invoke(visualError ?? "视觉来源暂不可用。");
-                        visualWarningShown = true;
+                        if (!visualWarningShown)
+                        {
+                            ErrorOccurred?.Invoke(visualError ?? "视觉来源暂不可用。");
+                            visualWarningShown = true;
+                        }
+                    }
+                    else
+                    {
+                        var committedCenter = visualOverlay.LastPresentedCenter ?? cursor;
+                        if (!controller.Update(committedCenter, out var syncRegionError))
+                        {
+                            visualOverlay.Hide();
+                            ErrorOccurred?.Invoke(syncRegionError ?? "无法同步透视交互区域。");
+                        }
                     }
                 }
 
@@ -151,7 +166,7 @@ internal sealed class PortalRuntime : IDisposable
                 }
 
                 wasActivationHeld = activationHeld;
-				// CPU 抓帧仍约 60Hz，但安全画布中的缓存帧位置以约 4ms 节奏跟随鼠标。
+				// CPU 抓帧目标约 120Hz，但安全画布中的缓存帧位置仍以约 4ms 节奏跟随鼠标。
 				// 只有按住 F8 时启用高频等待，不改变托盘空闲时的功耗。
 				var targetLoopMilliseconds = activationHeld
 					? Math.Min(pollMilliseconds, 4)
