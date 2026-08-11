@@ -10,6 +10,23 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 - （暂无）
 
+## [2.1.0-alpha.1] - 2026-08-11
+
+### Added
+
+- 矩形模式新增 0–80 像素边缘羽化，默认 24 像素；0 保留 2.0 的硬边效果，较小矩形会自动限制最大值。
+- Rectangle mode adds 0–80 px edge feathering, defaulting to 24 px. Set it to 0 for the 2.0 hard edge; smaller rectangles limit the maximum automatically.
+
+### Changed
+
+- 羽化带从当前层像素线性过渡到后台画面；物理穿透区域只使用完全不透明的内矩形，鼠标中心始终位于完整穿透区。
+- The feather band linearly transitions from foreground pixels to the background image. The physical hit-through hole uses only the fully opaque inner rectangle, keeping the pointer center in the fully open area.
+
+### Tests
+
+- 视觉冒烟同时覆盖圆形、硬边矩形与羽化矩形，并校验外沿透明、过渡带预乘 alpha、内沿不透明及连续移动黑帧。
+- Visual smoke now covers circle, hard rectangle, and feathered rectangle, checking transparent outer edge, premultiplied-alpha transition, opaque inner edge, and moving black frames.
+
 ## [2.0.0-alpha.1] - 2026-08-11
 
 ### Added

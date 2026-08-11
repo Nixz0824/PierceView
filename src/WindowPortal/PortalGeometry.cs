@@ -23,6 +23,13 @@ internal readonly record struct PortalGeometry(
 
     internal int GuardRadius => Math.Max(FrameWidth, FrameHeight) / 2;
 
+    internal int EffectiveFeatherWidth => Shape == PortalShape.Rectangle
+        ? Math.Clamp(
+            FeatherWidth,
+            0,
+            Math.Min((FrameWidth - 1) / 2, (FrameHeight - 1) / 2))
+        : 0;
+
     internal static PortalGeometry Circle(int radius) =>
         new(PortalShape.Circle, radius, 0, 0, 0);
 
@@ -39,15 +46,16 @@ internal readonly record struct PortalGeometry(
     internal NativeMethods.Rect CreateHitBounds(NativeMethods.Point center)
     {
         var frame = CreateFrameBounds(center);
-        if (Shape != PortalShape.Rectangle || FeatherWidth <= 0)
+        var inset = EffectiveFeatherWidth;
+        if (inset <= 0)
         {
             return frame;
         }
 
         return new NativeMethods.Rect(
-            frame.Left + FeatherWidth,
-            frame.Top + FeatherWidth,
-            frame.Right - FeatherWidth,
-            frame.Bottom - FeatherWidth);
+            frame.Left + inset,
+            frame.Top + inset,
+            frame.Right - inset,
+            frame.Bottom - inset);
     }
 }

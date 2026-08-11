@@ -7,7 +7,8 @@ internal sealed record UserSettings(
     string Language,
     string? PortalMode = null,
     int RectangleWidth = 420,
-    int RectangleHeight = 280)
+    int RectangleHeight = 280,
+    int FeatherWidth = 24)
 {
     internal const string CircleMode = "circle";
     internal const string RectangleMode = "rectangle";
@@ -20,6 +21,9 @@ internal sealed record UserSettings(
     internal const int MaximumRectangleWidth = 1000;
     internal const int MinimumRectangleHeight = 120;
     internal const int MaximumRectangleHeight = 800;
+    internal const int DefaultFeatherWidth = 24;
+    internal const int MinimumFeatherWidth = 0;
+    internal const int MaximumFeatherWidth = 80;
 
     internal static UserSettings CreateDefault() =>
         new(
@@ -27,7 +31,8 @@ internal sealed record UserSettings(
             Localizer.DefaultLanguage,
             RectangleMode,
             DefaultRectangleWidth,
-            DefaultRectangleHeight);
+            DefaultRectangleHeight,
+            DefaultFeatherWidth);
 
     internal UserSettings Normalize() =>
         this with
@@ -44,12 +49,16 @@ internal sealed record UserSettings(
                 RectangleHeight,
                 DefaultRectangleHeight,
                 MinimumRectangleHeight,
-                MaximumRectangleHeight)
+                MaximumRectangleHeight),
+            FeatherWidth = NormalizeFeatherWidth(
+                FeatherWidth,
+                RectangleWidth,
+                RectangleHeight)
         };
 
     internal PortalGeometry CreateGeometry() =>
         string.Equals(PortalMode, RectangleMode, StringComparison.OrdinalIgnoreCase)
-            ? PortalGeometry.Rectangle(RectangleWidth, RectangleHeight)
+            ? PortalGeometry.Rectangle(RectangleWidth, RectangleHeight, FeatherWidth)
             : PortalGeometry.Circle(Radius);
 
     private static string NormalizePortalMode(string? mode) =>
@@ -63,6 +72,27 @@ internal sealed record UserSettings(
         int minimum,
         int maximum) =>
         value == 0 ? defaultValue : Math.Clamp(value, minimum, maximum);
+
+    private static int NormalizeFeatherWidth(int value, int width, int height)
+    {
+        var normalizedWidth = NormalizeRectangleDimension(
+            width,
+            DefaultRectangleWidth,
+            MinimumRectangleWidth,
+            MaximumRectangleWidth);
+        var normalizedHeight = NormalizeRectangleDimension(
+            height,
+            DefaultRectangleHeight,
+            MinimumRectangleHeight,
+            MaximumRectangleHeight);
+        var geometryLimit = Math.Min(
+            (normalizedWidth - 1) / 2,
+            (normalizedHeight - 1) / 2);
+        return Math.Clamp(
+            value,
+            MinimumFeatherWidth,
+            Math.Min(MaximumFeatherWidth, geometryLimit));
+    }
 }
 
 internal sealed class UserSettingsStore

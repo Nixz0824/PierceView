@@ -30,6 +30,8 @@ internal sealed record UiText(
     string RadiusHint,
     string RectangleSizeLabel,
     string RectangleSizeHint,
+    string FeatherWidthLabel,
+    string FeatherWidthHint,
     string LanguageLabel,
     string ChineseLanguage,
     string EnglishLanguage,
@@ -60,6 +62,8 @@ internal sealed record UiText(
         "范围 64–400 像素，建议保持 180。",
         "矩形尺寸",
         "宽 160–1000，高 120–800 像素。",
+        "边缘羽化",
+        "0 为硬边，最大 80 像素；较小矩形会自动限制。",
         "界面语言",
         "简体中文",
         "English",
@@ -78,7 +82,7 @@ internal sealed record UiText(
         "按住 F8：不用来回 Alt+Tab，直接查看、滚动或点击当前窗口后面的一层普通应用。\n" +
         "松开 F8：立即关闭透视并恢复当前窗口。\n\n" +
         "在支持 Windows 原生拖放的应用中，可以从后台选中文字、图片或文件并保持拖动，松开 F8 后把它拖到当前应用的合适位置再放手。是否可复制取决于两端应用的拖放支持。\n\n" +
-        "当前版本只支持紧贴当前窗口后方的一层。可在设置中选择硬边矩形，或继续使用 1.0 兼容圆形。游戏、反作弊、受保护视频、系统界面和无重定向窗口可能只有点击、没有画面。启动游戏前请从托盘完全退出寸镜。",
+        "当前版本只支持紧贴当前窗口后方的一层。可在设置中选择矩形并调整边缘羽化，或继续使用 1.0 兼容圆形。羽化只作用于矩形外观，鼠标中心仍位于完全穿透区域。游戏、反作弊、受保护视频、系统界面和无重定向窗口可能只有点击、没有画面。启动游戏前请从托盘完全退出寸镜。",
         "暂时无法透视",
         "请确认鼠标下方存在普通桌面应用，并避开游戏、受保护内容和系统界面。",
         "寸镜 / PierceView 已经在运行。请从系统托盘打开设置。",
@@ -93,6 +97,8 @@ internal sealed record UiText(
         "64–400 pixels. 180 is recommended.",
         "Rectangle size",
         "Width 160–1000, height 120–800 pixels.",
+        "Edge feather",
+        "0 is hard-edged; up to 80 px. Smaller rectangles limit it automatically.",
         "Language",
         "简体中文",
         "English",
@@ -111,7 +117,7 @@ internal sealed record UiText(
         "Hold F8: skip repetitive Alt+Tab switching and directly view, scroll, or click one ordinary app behind the current window.\n" +
         "Release F8: close the portal and restore the current window immediately.\n\n" +
         "When both apps support native Windows drag-and-drop, you can start dragging text, an image, or a file in the background app, release F8, then drop it into the current app. Actual copy behavior depends on both apps.\n\n" +
-        "The current version supports only the layer directly behind the current window. Choose a hard-edged rectangle in Settings, or keep the 1.0-compatible circle. Games, anti-cheat software, protected video, system UI, and no-redirection windows may accept clicks without showing an image. Fully exit PierceView before starting a game.",
+        "The current version supports only the layer directly behind the current window. Choose a rectangle and adjust edge feathering in Settings, or keep the 1.0-compatible circle. Feathering changes only the rectangular appearance; the pointer center remains inside the fully open hit area. Games, anti-cheat software, protected video, system UI, and no-redirection windows may accept clicks without showing an image. Fully exit PierceView before starting a game.",
         "Portal unavailable",
         "Make sure a standard desktop app is under the cursor. Avoid games, protected content, and system UI.",
         "PierceView is already running. Open it from the system tray.",

@@ -49,6 +49,7 @@ internal static class SelfTests
             var center = new NativeMethods.Point(500, 400);
             var circle = PortalGeometry.Circle(180);
             var rectangle = PortalGeometry.Rectangle(420, 280);
+            var featheredRectangle = PortalGeometry.Rectangle(420, 280, 24);
             return circle.CreateFrameBounds(center) ==
                        new NativeMethods.Rect(320, 220, 681, 581) &&
                    circle.CreateHitBounds(center) ==
@@ -56,7 +57,11 @@ internal static class SelfTests
                    rectangle.CreateFrameBounds(center) ==
                        new NativeMethods.Rect(290, 260, 710, 540) &&
                    rectangle.CreateHitBounds(center) ==
-                       new NativeMethods.Rect(290, 260, 710, 540);
+                       new NativeMethods.Rect(290, 260, 710, 540) &&
+                   featheredRectangle.CreateFrameBounds(center) ==
+                       new NativeMethods.Rect(290, 260, 710, 540) &&
+                   featheredRectangle.CreateHitBounds(center) ==
+                       new NativeMethods.Rect(314, 284, 686, 516);
         }, failures, ref total);
 
         Check(
@@ -80,7 +85,8 @@ internal static class SelfTests
             return defaults.PortalMode == UserSettings.RectangleMode &&
                    geometry == PortalGeometry.Rectangle(
                        UserSettings.DefaultRectangleWidth,
-                       UserSettings.DefaultRectangleHeight);
+                       UserSettings.DefaultRectangleHeight,
+                       UserSettings.DefaultFeatherWidth);
         }, failures, ref total);
 
         Check("旧设置迁移为圆形", () => WithTemporaryStore((store, path) =>
@@ -89,7 +95,19 @@ internal static class SelfTests
             File.WriteAllText(path, "{\"Radius\":230,\"Language\":\"en-US\"}");
             var migrated = store.Load();
             return migrated.PortalMode == UserSettings.CircleMode &&
+                   migrated.FeatherWidth == UserSettings.DefaultFeatherWidth &&
                    migrated.CreateGeometry() == PortalGeometry.Circle(230);
+        }), failures, ref total);
+
+        Check("2.0 矩形设置获得默认羽化", () => WithTemporaryStore((store, path) =>
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(
+                path,
+                "{\"Radius\":180,\"Language\":\"zh-CN\",\"PortalMode\":\"rectangle\",\"RectangleWidth\":420,\"RectangleHeight\":280}");
+            var migrated = store.Load();
+            return migrated.FeatherWidth == UserSettings.DefaultFeatherWidth &&
+                   migrated.CreateGeometry() == PortalGeometry.Rectangle(420, 280, 24);
         }), failures, ref total);
 
         Check("矩形设置规范化", () =>
@@ -99,12 +117,15 @@ internal static class SelfTests
                 Localizer.English,
                 UserSettings.RectangleMode,
                 1,
-                9999).Normalize();
+                9999,
+                80).Normalize();
             return normalized.RectangleWidth == UserSettings.MinimumRectangleWidth &&
                    normalized.RectangleHeight == UserSettings.MaximumRectangleHeight &&
+                   normalized.FeatherWidth == 79 &&
                    normalized.CreateGeometry() == PortalGeometry.Rectangle(
                        UserSettings.MinimumRectangleWidth,
-                       UserSettings.MaximumRectangleHeight);
+                       UserSettings.MaximumRectangleHeight,
+                       79);
         }, failures, ref total);
 
         Check(
@@ -137,7 +158,7 @@ internal static class SelfTests
             return logo is { Width: > 0, Height: > 0 } &&
                    chineseForm.Text.Contains("寸镜", StringComparison.Ordinal) &&
                    englishForm.Text.Contains("PierceView", StringComparison.Ordinal) &&
-                   controls.OfType<NumericUpDown>().Count() == 3 &&
+                   controls.OfType<NumericUpDown>().Count() == 4 &&
                    controls.OfType<ComboBox>().Count() == 2 &&
                    controls.OfType<Button>().Count() == 2;
         }, failures, ref total);

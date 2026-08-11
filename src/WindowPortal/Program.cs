@@ -359,7 +359,7 @@ internal static class Program
     private static void PrintHelp()
     {
         Console.WriteLine(
-            "寸镜 / PierceView - Windows 单层圆形透视托盘工具\n\n" +
+            "寸镜 / PierceView - Windows 单层窗口透视托盘工具\n\n" +
             "用法：\n" +
             "  PierceView [--radius <像素>] [--poll-ms <毫秒>]\n" +
             "  PierceView --probe-hwnd <句柄> [--probe-duration-ms <毫秒>] [--radius <像素>]\n" +
@@ -377,7 +377,7 @@ internal static class Program
             "  --probe-hwnd          对指定十进制或 0x 十六进制 HWND 做短暂探测\n" +
             "  --probe-duration-ms   探测持续时间，默认 1500\n" +
             "  --self-test           运行无需桌面窗口的纯逻辑自检\n" +
-            "  --visual-smoke        自动视觉冒烟（自建色块窗采样圆/闪黑回归）\n" +
+            "  --visual-smoke        自动视觉冒烟（采样圆形、矩形、羽化与闪黑回归）\n" +
             "  --list-windows        列出可见顶层窗口、进程、类名和 HWND\n" +
             "  --inspect-hwnd        输出目标窗口的父子、所有者和 Z-order 诊断\n" +
             "  --inspect-point       指定诊断坐标；默认使用窗口中心");

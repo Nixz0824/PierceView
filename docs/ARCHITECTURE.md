@@ -1,8 +1,8 @@
-# 寸镜 / PierceView 2.0 架构说明
+# 寸镜 / PierceView 2.1 架构说明
 
-Architecture notes for the **2.0 alpha** single-layer circle/rectangle portal. This page describes the current local development build—not internal product roadmaps.
+Architecture notes for the **2.1 alpha** single-layer circle/feathered-rectangle portal. This page describes the current local development build—not internal product roadmaps.
 
-本页说明当前本地开发的 **2.0 alpha** 单层圆形/矩形透视如何工作，不包含内部产品路线。
+本页说明当前本地开发的 **2.1 alpha** 单层圆形/羽化矩形透视如何工作，不包含内部产品路线。
 
 ## 总体结构 / Overview
 
@@ -10,7 +10,7 @@ Architecture notes for the **2.0 alpha** single-layer circle/rectangle portal. T
 托盘 UI 线程 / Tray UI thread
   ├─ NotifyIcon：启动/暂停、设置、帮助、退出
   │  Start/Pause, Settings, Help, Exit
-  ├─ SettingsForm：形状、半径/矩形尺寸、语言 / shape, size, language
+  ├─ SettingsForm：形状、半径/矩形尺寸、羽化、语言 / shape, size, feather, language
   └─ PortalRuntime：启动/停止工作线程 / start/stop worker
 
 单层运行线程 / Single-layer runtime thread
@@ -37,7 +37,8 @@ On normal launch, `Program` creates a single-instance mutex and `PierceViewAppli
 2. 在宿主 region 中减去所选圆形或矩形后，`WindowFromPoint` 得到该位置当前暴露的后方一层顶层窗口。After subtracting the selected circle or rectangle, resolve the one top-level window now exposed behind the host.
 3. 本次 F8 会话固定使用这个来源，不枚举或切换更深窗口。That source stays fixed for the hold session; deeper windows are not scanned or switched to.
 4. `DwmPortalOverlay` 用 DWM thumbnail 把来源窗口对应区域画到所选形状的预览窗。DWM thumbnails paint the matching source region into the selected portal shape.
-5. 预览在屏外窗更新单张 DWM 缩略图，抓帧后做形状预乘 alpha，再用 `UpdateLayeredWindow` 一次提交。圆形完整沿用 1.0.6 管线；2.0 硬边矩形使用同一整帧路径。Capture one DWM thumbnail off-screen, apply shape premultiplied alpha, then present once with `UpdateLayeredWindow`. The circle retains the 1.0.6 pipeline; the 2.0 hard rectangle uses the same full-frame path.
+5. 预览在屏外窗更新单张 DWM 缩略图，抓帧后做形状预乘 alpha，再用 `UpdateLayeredWindow` 一次提交。圆形完整沿用 1.0.6 管线；硬边与羽化矩形使用同一整帧路径。Capture one DWM thumbnail off-screen, apply shape premultiplied alpha, then present once with `UpdateLayeredWindow`. The circle retains the 1.0.6 pipeline; hard and feathered rectangles use the same full-frame path.
+6. 羽化矩形的外沿 alpha 为 0，向内线性增长，在羽化宽度处达到 255。宿主窗口 region 只减去完全不透明的内矩形，因此过渡带仍保留当前层像素；预览层将后台像素叠加其上形成渐变。For a feathered rectangle, alpha starts at 0 on the outer edge and grows linearly to 255 at the feather width. The host region subtracts only the fully opaque inner rectangle, leaving foreground pixels under the transition band for the preview to blend against.
 6. 松开 F8 时先隐藏预览，再恢复宿主 region 和来源扩展样式。On release, hide the preview, then restore the host region and source extended styles.
 
 ## 交互与前台保护 / Input and foreground protection

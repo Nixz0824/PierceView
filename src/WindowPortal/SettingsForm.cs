@@ -12,6 +12,9 @@ internal sealed class SettingsForm : Form
     private readonly Label _rectangleSizeHint = new();
     private readonly NumericUpDown _rectangleWidthInput = new();
     private readonly NumericUpDown _rectangleHeightInput = new();
+    private readonly Label _featherWidthLabel = new();
+    private readonly Label _featherWidthHint = new();
+    private readonly NumericUpDown _featherWidthInput = new();
     private readonly Label _languageLabel = new();
     private readonly ComboBox _languageInput = new();
     private readonly Button _saveButton = new();
@@ -26,8 +29,8 @@ internal sealed class SettingsForm : Form
         _saveSettings = saveSettings;
 
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(460, 336);
-        MinimumSize = new Size(460, 336);
+        ClientSize = new Size(460, 414);
+        MinimumSize = new Size(460, 414);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -68,12 +71,12 @@ internal sealed class SettingsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 7,
+            RowCount = 9,
             Padding = new Padding(24, 22, 24, 18)
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        for (var row = 0; row < 6; row++)
+        for (var row = 0; row < 8; row++)
         {
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         }
@@ -123,6 +126,8 @@ internal sealed class SettingsForm : Form
 
         ConfigureRectangleDimension(_rectangleWidthInput, UserSettings.MinimumRectangleWidth, UserSettings.MaximumRectangleWidth);
         ConfigureRectangleDimension(_rectangleHeightInput, UserSettings.MinimumRectangleHeight, UserSettings.MaximumRectangleHeight);
+        _rectangleWidthInput.ValueChanged += (_, _) => UpdateFeatherMaximum();
+        _rectangleHeightInput.ValueChanged += (_, _) => UpdateFeatherMaximum();
         var rectangleSizePanel = new FlowLayoutPanel
         {
             AutoSize = true,
@@ -148,10 +153,29 @@ internal sealed class SettingsForm : Form
         root.SetColumnSpan(_rectangleSizeHint, 2);
         root.Controls.Add(_rectangleSizeHint, 0, 4);
 
+        _featherWidthLabel.AutoSize = true;
+        _featherWidthLabel.Anchor = AnchorStyles.Left;
+        _featherWidthLabel.Margin = new Padding(0, 4, 16, 4);
+        root.Controls.Add(_featherWidthLabel, 0, 5);
+
+        _featherWidthInput.Minimum = UserSettings.MinimumFeatherWidth;
+        _featherWidthInput.Maximum = UserSettings.MaximumFeatherWidth;
+        _featherWidthInput.Increment = 2;
+        _featherWidthInput.Width = 96;
+        _featherWidthInput.TextAlign = HorizontalAlignment.Right;
+        _featherWidthInput.Anchor = AnchorStyles.Right;
+        root.Controls.Add(_featherWidthInput, 1, 5);
+
+        _featherWidthHint.AutoSize = true;
+        _featherWidthHint.ForeColor = SystemColors.GrayText;
+        _featherWidthHint.Margin = new Padding(0, 2, 0, 18);
+        root.SetColumnSpan(_featherWidthHint, 2);
+        root.Controls.Add(_featherWidthHint, 0, 6);
+
         _languageLabel.AutoSize = true;
         _languageLabel.Anchor = AnchorStyles.Left;
         _languageLabel.Margin = new Padding(0, 4, 16, 4);
-        root.Controls.Add(_languageLabel, 0, 5);
+        root.Controls.Add(_languageLabel, 0, 7);
 
         _languageInput.DropDownStyle = ComboBoxStyle.DropDownList;
         _languageInput.Width = 140;
@@ -163,7 +187,7 @@ internal sealed class SettingsForm : Form
                 UpdateTexts();
             }
         };
-        root.Controls.Add(_languageInput, 1, 5);
+        root.Controls.Add(_languageInput, 1, 7);
 
         var buttons = new FlowLayoutPanel
         {
@@ -184,7 +208,7 @@ internal sealed class SettingsForm : Form
         buttons.Controls.Add(_saveButton);
         buttons.Controls.Add(_cancelButton);
         root.SetColumnSpan(buttons, 2);
-        root.Controls.Add(buttons, 0, 6);
+        root.Controls.Add(buttons, 0, 8);
     }
 
     private static void ConfigureRectangleDimension(
@@ -205,6 +229,10 @@ internal sealed class SettingsForm : Form
         _radiusInput.Value = normalized.Radius;
         _rectangleWidthInput.Value = normalized.RectangleWidth;
         _rectangleHeightInput.Value = normalized.RectangleHeight;
+        UpdateFeatherMaximum();
+        _featherWidthInput.Value = Math.Min(
+            normalized.FeatherWidth,
+            decimal.ToInt32(_featherWidthInput.Maximum));
         _updatingUi = true;
         _shapeInput.Items.Clear();
         _shapeInput.Items.Add(string.Empty);
@@ -233,6 +261,8 @@ internal sealed class SettingsForm : Form
         _radiusHint.Text = text.RadiusHint;
         _rectangleSizeLabel.Text = text.RectangleSizeLabel;
         _rectangleSizeHint.Text = text.RectangleSizeHint;
+        _featherWidthLabel.Text = text.FeatherWidthLabel;
+        _featherWidthHint.Text = text.FeatherWidthHint;
         _languageLabel.Text = text.LanguageLabel;
         _saveButton.Text = text.Save;
         _cancelButton.Text = text.Cancel;
@@ -240,6 +270,7 @@ internal sealed class SettingsForm : Form
         _radiusInput.AccessibleName = text.RadiusLabel;
         _rectangleWidthInput.AccessibleName = text.RectangleSizeLabel + " width";
         _rectangleHeightInput.AccessibleName = text.RectangleSizeLabel + " height";
+        _featherWidthInput.AccessibleName = text.FeatherWidthLabel;
         _languageInput.AccessibleName = text.LanguageLabel;
         UpdateModeEnabledState();
     }
@@ -254,6 +285,23 @@ internal sealed class SettingsForm : Form
         _rectangleSizeHint.Enabled = rectangle;
         _rectangleWidthInput.Enabled = rectangle;
         _rectangleHeightInput.Enabled = rectangle;
+        _featherWidthLabel.Enabled = rectangle;
+        _featherWidthHint.Enabled = rectangle;
+        _featherWidthInput.Enabled = rectangle;
+    }
+
+    private void UpdateFeatherMaximum()
+    {
+        var geometryLimit = Math.Min(
+            (decimal.ToInt32(_rectangleWidthInput.Value) - 1) / 2,
+            (decimal.ToInt32(_rectangleHeightInput.Value) - 1) / 2);
+        var maximum = Math.Min(UserSettings.MaximumFeatherWidth, geometryLimit);
+        if (_featherWidthInput.Value > maximum)
+        {
+            _featherWidthInput.Value = maximum;
+        }
+
+        _featherWidthInput.Maximum = maximum;
     }
 
     private void SaveAndClose()
@@ -263,7 +311,8 @@ internal sealed class SettingsForm : Form
             Language,
             PortalMode,
             decimal.ToInt32(_rectangleWidthInput.Value),
-            decimal.ToInt32(_rectangleHeightInput.Value));
+            decimal.ToInt32(_rectangleHeightInput.Value),
+            decimal.ToInt32(_featherWidthInput.Value));
         if (!_saveSettings(settings))
         {
             return;

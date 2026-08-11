@@ -9,16 +9,23 @@ using System.Windows.Forms;
 namespace WindowPortal;
 
 /// <summary>
-/// DWM 单层透视预览。圆形沿用 1.0.5 稳定路径，2.0 增加同管线矩形模式。
+/// DWM 单层透视预览。圆形沿用 1.0.5 稳定路径，2.x 在同管线增加硬边/羽化矩形。
 /// 不用条带（条带重影）、不用「全幅+Region/双缓冲换帧」（易变方、闪圆）。
 /// 流程：屏外捕获窗上挂单张 DWM 缩略图 → 抓成位图 → CPU 形状蒙版预乘 alpha
 /// → UpdateLayeredWindow 一次提交整帧。形状与内容同帧，避免叠影与换帧闪烁。
 /// </summary>
 internal sealed class DwmPortalOverlay : IDisposable
 {
+	internal static void ApplyPremultipliedAlphaForTesting(
+		Bitmap frame,
+		PortalGeometry geometry) =>
+		PortalFrameComposer.ApplyPremultipliedAlpha(frame, geometry);
+
 	private sealed class PortalOverlayManager : Form
 	{
 		private readonly PortalGeometry _geometry;
+
+		private readonly bool _enableForegroundGuard;
 
 		private CaptureSurface? _capture;
 
@@ -44,9 +51,10 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		internal int BackgroundPromotionCount => _foregroundGuard.PromotionCount;
 
-		internal PortalOverlayManager(PortalGeometry geometry)
+		internal PortalOverlayManager(PortalGeometry geometry, bool enableForegroundGuard)
 		{
 			_geometry = geometry;
+			_enableForegroundGuard = enableForegroundGuard;
 			FormBorderStyle = FormBorderStyle.None;
 			ShowInTaskbar = false;
 			StartPosition = FormStartPosition.Manual;
@@ -67,7 +75,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 		{
 			HidePortal();
 			SourceWindow = sourceWindow;
-			if (!_foregroundGuard.TryEnable(sourceWindow, protectedWindow, screenCenter, _geometry.GuardRadius, out error))
+			if (_enableForegroundGuard &&
+			    !_foregroundGuard.TryEnable(sourceWindow, protectedWindow, screenCenter, _geometry.GuardRadius, out error))
 			{
 				HidePortal();
 				return false;
@@ -95,7 +104,10 @@ internal sealed class DwmPortalOverlay : IDisposable
 			}
 
 			_portalVisible = true;
-			_zOrderGuardTimer.Start();
+			if (_enableForegroundGuard)
+			{
+				_zOrderGuardTimer.Start();
+			}
 			_lastScreenCenter = screenCenter;
 			_lastSourceRect = rect;
 			error = null;
@@ -106,7 +118,10 @@ internal sealed class DwmPortalOverlay : IDisposable
 			NativeMethods.Point screenCenter,
 			out string? error)
 		{
-			_foregroundGuard.UpdatePortalGeometry(screenCenter, _geometry.GuardRadius);
+			if (_enableForegroundGuard)
+			{
+				_foregroundGuard.UpdatePortalGeometry(screenCenter, _geometry.GuardRadius);
+			}
 
 			if (!_portalVisible ||
 			    _capture is null ||
@@ -647,6 +662,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 		{
 			var radius = geometry.Radius;
 			var radiusSquared = (long)radius * radius;
+			var featherWidth = geometry.EffectiveFeatherWidth;
 			var data = frame.LockBits(
 				new Rectangle(0, 0, frame.Width, frame.Height),
 				ImageLockMode.ReadWrite,
@@ -665,8 +681,28 @@ internal sealed class DwmPortalOverlay : IDisposable
 					{
 						var dx = x - radius;
 						var i = row + (x * 4);
-						if (geometry.Shape == PortalShape.Circle &&
-						    ((long)dx * dx) + ((long)dy * dy) > radiusSquared)
+						byte alpha;
+						if (geometry.Shape == PortalShape.Circle)
+						{
+							alpha = ((long)dx * dx) + ((long)dy * dy) > radiusSquared
+								? (byte)0
+								: byte.MaxValue;
+						}
+						else if (featherWidth > 0)
+						{
+							var edgeDistance = Math.Min(
+								Math.Min(x, frame.Width - 1 - x),
+								Math.Min(y, frame.Height - 1 - y));
+							alpha = edgeDistance >= featherWidth
+								? byte.MaxValue
+								: (byte)((edgeDistance * 255 + (featherWidth / 2)) / featherWidth);
+						}
+						else
+						{
+							alpha = byte.MaxValue;
+						}
+
+						if (alpha == 0)
 						{
 							buffer[i] = 0;
 							buffer[i + 1] = 0;
@@ -675,14 +711,20 @@ internal sealed class DwmPortalOverlay : IDisposable
 							continue;
 						}
 
-						// 硬边矩形与圆内像素均完全不透明。
+						// UpdateLayeredWindow 要求颜色通道与 alpha 预乘。
 						var b = buffer[i];
 						var g = buffer[i + 1];
 						var r = buffer[i + 2];
-						buffer[i] = b;
-						buffer[i + 1] = g;
-						buffer[i + 2] = r;
-						buffer[i + 3] = 255;
+						buffer[i] = alpha == byte.MaxValue
+							? b
+							: (byte)((b * alpha + 127) / 255);
+						buffer[i + 1] = alpha == byte.MaxValue
+							? g
+							: (byte)((g * alpha + 127) / 255);
+						buffer[i + 2] = alpha == byte.MaxValue
+							? r
+							: (byte)((r * alpha + 127) / 255);
+						buffer[i + 3] = alpha;
 					}
 				}
 
@@ -696,6 +738,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 	}
 
 	private readonly PortalGeometry _geometry;
+
+	private readonly bool _enableForegroundGuard;
 
 	private readonly Thread _thread;
 
@@ -718,13 +762,22 @@ internal sealed class DwmPortalOverlay : IDisposable
 	internal int BackgroundPromotionCount => Invoke(static manager => manager.BackgroundPromotionCount);
 
 	internal DwmPortalOverlay(int radius)
-		: this(PortalGeometry.Circle(radius))
+		: this(PortalGeometry.Circle(radius), enableForegroundGuard: true)
 	{
 	}
 
 	internal DwmPortalOverlay(PortalGeometry geometry)
+		: this(geometry, enableForegroundGuard: true)
+	{
+	}
+
+	/// <summary>
+	/// 仅供同进程视觉夹具关闭前台守卫；生产构造路径始终传入 true。
+	/// </summary>
+	internal DwmPortalOverlay(PortalGeometry geometry, bool enableForegroundGuard)
 	{
 		_geometry = geometry;
+		_enableForegroundGuard = enableForegroundGuard;
 		_thread = new Thread(RunMessageLoop)
 		{
 			IsBackground = true,
@@ -833,7 +886,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 	{
 		try
 		{
-			_manager = new PortalOverlayManager(_geometry);
+			_manager = new PortalOverlayManager(_geometry, _enableForegroundGuard);
 			_applicationContext = new ApplicationContext(_manager);
 			_ready.Set();
 			Application.Run(_applicationContext);
