@@ -277,10 +277,32 @@ internal sealed class WindowRegionController : IDisposable
 
 	private bool ApplyHole(nint window, NativeMethods.Rect windowRect, NativeMethods.Point screenPoint, out string? error)
 	{
+		return ApplyHoleCore(window, windowRect, screenPoint, _geometry, out error);
+	}
+
+	// Visual smoke uses the same region-update path as production so a test-only
+	// redraw flag cannot silently diverge from the behavior users actually run.
+	internal static bool TryApplyHoleForVisualTest(
+		nint window,
+		NativeMethods.Rect windowRect,
+		NativeMethods.Point screenPoint,
+		PortalGeometry geometry,
+		out string? error)
+	{
+		return ApplyHoleCore(window, windowRect, screenPoint, geometry, out error);
+	}
+
+	private static bool ApplyHoleCore(
+		nint window,
+		NativeMethods.Rect windowRect,
+		NativeMethods.Point screenPoint,
+		PortalGeometry geometry,
+		out string? error)
+	{
 		var center = ToWindowCoordinates(windowRect, screenPoint);
 		// 视觉形状由独立的分层窗完整绘制。窗口 Region 只保留鼠标中心附近的
 		// 小型交互孔，避免两个系统窗口换位不同步时短暂露出第二个圆/矩形。
-		var rect = CreateHoleBounds(center, _geometry.EffectiveInteractionRadius);
+		var rect = CreateHoleBounds(center, geometry.EffectiveInteractionRadius);
 		nint num = NativeMethods.CreateRectRgn(0, 0, windowRect.Width, windowRect.Height);
 		nint num2 = NativeMethods.CreateEllipticRgn(
 			rect.Left,
@@ -302,7 +324,9 @@ internal sealed class WindowRegionController : IDisposable
 			error = LastWin32Error("无法从窗口区域中减去透视区域");
 			return false;
 		}
-		if (NativeMethods.SetWindowRgn(window, num, redraw: false) == 0)
+		// 交互孔移动后必须让 Windows 立即重绘重新覆盖的旧位置。若关闭重绘，
+		// DWM 可能短暂保留旧孔露出的像素，看起来就像透视窗在移动路径上闪现。
+		if (NativeMethods.SetWindowRgn(window, num, redraw: true) == 0)
 		{
 			NativeMethods.DeleteObject(num);
 			error = LastWin32Error($"Windows 拒绝修改渲染窗口 0x{window:X}；如果目标程序以管理员身份运行，请用相同权限启动本工具");

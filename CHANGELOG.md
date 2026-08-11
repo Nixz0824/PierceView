@@ -10,6 +10,18 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 - （暂无）
 
+## [2.1.0-cpu-alpha.2] - 2026-08-11
+
+### Fixed
+
+- 修复 CPU 稳定画布版本移动时仍可能在旧路径闪现小型透视区域：物理交互孔每次移动后改为请求 Windows 立即重绘重新覆盖的位置，不改动已经稳定的 CPU 抓帧、缓存跟随和 alpha 合成路径。
+- Fix the small portal remnant that could still flash along the old movement path in the CPU stable-canvas build. Each physical input-aperture move now requests an immediate repaint of the re-covered area without changing the stabilized CPU capture, cached-follow, or alpha-composition path.
+
+### Tests
+
+- 视觉冒烟的交互孔辅助逻辑改为直接复用生产 region 更新路径，并让稳定画布旧位置测试同时移动视觉 alpha 与物理交互孔，避免测试使用重绘而正式代码未使用的漏检。
+- Make the visual-smoke aperture helper reuse the production region-update path, and move both the visual alpha and physical input aperture in the stable-canvas stale-position test, preventing a test/production redraw mismatch from escaping again.
+
 ## [2.1.0-cpu-alpha.1] - 2026-08-11
 
 ### Fixed

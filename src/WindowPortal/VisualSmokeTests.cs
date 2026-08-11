@@ -716,6 +716,12 @@ internal static class VisualSmokeTests
 			front.Top + (front.Height / 2));
 		var moved = new NativeMethods.Point(origin.X + 72, origin.Y);
 		using var overlay = new DwmPortalOverlay(geometry, enableForegroundGuard: false);
+		if (!TryApplyTestHole(front, origin, geometry, out var initialHoleError))
+		{
+			failures.Add("稳定画布残留测试无法创建初始交互孔：" + initialHoleError);
+			return;
+		}
+
 		if (!overlay.TryShow(back.Handle, front.Handle, origin, out var showError))
 		{
 			failures.Add("稳定画布残留测试无法显示透视：" + showError);
@@ -725,6 +731,12 @@ internal static class VisualSmokeTests
 		Application.DoEvents();
 		Thread.Sleep(20);
 		var relocationsBeforeMove = overlay.DisplayRelocationCount;
+		if (!TryApplyTestHole(front, moved, geometry, out var moveHoleError))
+		{
+			failures.Add("稳定画布残留测试无法移动交互孔：" + moveHoleError);
+			return;
+		}
+
 		if (!overlay.TryUpdate(moved, out var updateError))
 		{
 			failures.Add("稳定画布残留测试无法移动透视：" + updateError);
@@ -988,57 +1000,18 @@ internal static class VisualSmokeTests
 		PortalGeometry geometry,
 		out string? error)
 	{
-		var center = new NativeMethods.Point(
-			screenCenter.X - window.Left,
-			screenCenter.Y - window.Top);
-		var bounds = WindowRegionController.CreateHoleBounds(
-			center,
-			geometry.EffectiveInteractionRadius);
-		var windowRegion = NativeMethods.CreateRectRgn(0, 0, window.Width, window.Height);
-		var holeRegion = NativeMethods.CreateEllipticRgn(
-			bounds.Left,
-			bounds.Top,
-			bounds.Right,
-			bounds.Bottom);
-
-		if (windowRegion == nint.Zero || holeRegion == nint.Zero)
+		if (!NativeMethods.GetWindowRect(window.Handle, out var windowRect))
 		{
-			if (windowRegion != nint.Zero)
-			{
-				_ = NativeMethods.DeleteObject(windowRegion);
-			}
-
-			if (holeRegion != nint.Zero)
-			{
-				_ = NativeMethods.DeleteObject(holeRegion);
-			}
-
-			error = "无法创建测试区域。";
+			error = "无法读取测试窗口位置。";
 			return false;
 		}
 
-		var combineResult = NativeMethods.CombineRgn(
-			windowRegion,
-			windowRegion,
-			holeRegion,
-			NativeMethods.RgnDiff);
-		_ = NativeMethods.DeleteObject(holeRegion);
-		if (combineResult == 0)
-		{
-			_ = NativeMethods.DeleteObject(windowRegion);
-			error = "无法从测试前景窗减去透视区域。";
-			return false;
-		}
-
-		if (NativeMethods.SetWindowRgn(window.Handle, windowRegion, redraw: true) == 0)
-		{
-			_ = NativeMethods.DeleteObject(windowRegion);
-			error = "Windows 拒绝设置测试窗口缺口。";
-			return false;
-		}
-
-		error = null;
-		return true;
+		return WindowRegionController.TryApplyHoleForVisualTest(
+			window.Handle,
+			windowRect,
+			screenCenter,
+			geometry,
+			out error);
 	}
 
 	private static Bitmap CaptureScreenRect(int left, int top, int width, int height)
