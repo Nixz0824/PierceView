@@ -21,7 +21,7 @@ internal sealed class WindowRegionController : IDisposable
 
 	private static readonly HashSet<string> ProtectedShellWindowClasses = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd" };
 
-	private readonly int _radius;
+	private readonly PortalGeometry _geometry;
 
 	private readonly List<RegionWindowState> _windows = new List<RegionWindowState>();
 
@@ -48,8 +48,13 @@ internal sealed class WindowRegionController : IDisposable
 	}
 
 	internal WindowRegionController(int radius)
+		: this(PortalGeometry.Circle(radius))
 	{
-		_radius = radius;
+	}
+
+	internal WindowRegionController(PortalGeometry geometry)
+	{
+		_geometry = geometry;
 	}
 
 	internal bool TryBeginAtCursor(out string message)
@@ -163,7 +168,7 @@ internal sealed class WindowRegionController : IDisposable
 			}
 			NativeMethods.Point point = ToWindowCoordinates(rect, screenPoint);
 			bool flag = !NativeMethods.PtInRegion(num, point.X, point.Y);
-			string detail = (flag ? $"圆心已从目标窗口区域中排除；同步裁剪层数={ActiveLayerCount}。" : "圆心仍在目标窗口区域内。");
+			string detail = (flag ? $"透视中心已从目标窗口区域中排除；同步裁剪层数={ActiveLayerCount}。" : "透视中心仍在目标窗口区域内。");
 			return new RegionInspection(windowRgn, flag, detail);
 		}
 		finally
@@ -272,14 +277,19 @@ internal sealed class WindowRegionController : IDisposable
 
 	private bool ApplyHole(nint window, NativeMethods.Rect windowRect, NativeMethods.Point screenPoint, out string? error)
 	{
-		NativeMethods.Rect rect = CreateHoleBounds(ToWindowCoordinates(windowRect, screenPoint), _radius);
+		var center = ToWindowCoordinates(windowRect, screenPoint);
+		NativeMethods.Rect rect = _geometry.Shape == PortalShape.Circle
+			? CreateHoleBounds(center, _geometry.Radius)
+			: _geometry.CreateHitBounds(center);
 		nint num = NativeMethods.CreateRectRgn(0, 0, windowRect.Width, windowRect.Height);
-		nint num2 = NativeMethods.CreateEllipticRgn(rect.Left, rect.Top, rect.Right, rect.Bottom);
+		nint num2 = _geometry.Shape == PortalShape.Circle
+			? NativeMethods.CreateEllipticRgn(rect.Left, rect.Top, rect.Right, rect.Bottom)
+			: NativeMethods.CreateRectRgn(rect.Left, rect.Top, rect.Right, rect.Bottom);
 		if (num == IntPtr.Zero || num2 == IntPtr.Zero)
 		{
 			DeleteIfOwned(num);
 			DeleteIfOwned(num2);
-			error = LastWin32Error("无法创建圆形窗口区域");
+			error = LastWin32Error("无法创建透视窗口区域");
 			return false;
 		}
 		int num3 = NativeMethods.CombineRgn(num, num, num2, 4);
@@ -287,7 +297,7 @@ internal sealed class WindowRegionController : IDisposable
 		if (num3 == 0)
 		{
 			NativeMethods.DeleteObject(num);
-			error = LastWin32Error("无法从窗口区域中减去圆形区域");
+			error = LastWin32Error("无法从窗口区域中减去透视区域");
 			return false;
 		}
 		if (NativeMethods.SetWindowRgn(window, num, redraw: false) == 0)

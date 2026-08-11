@@ -68,24 +68,54 @@ internal static class VisualSmokeTests
 
 	private static void RunCore(int radius, List<string> failures)
 	{
-		var diameter = radius * 2 + 1;
 		var frontColor = Color.FromArgb(255, 220, 40, 40);
 		var backColor = Color.FromArgb(255, 40, 200, 80);
+		RunShape(
+			"硬边矩形模式",
+			PortalGeometry.Rectangle(
+				UserSettings.DefaultRectangleWidth,
+				UserSettings.DefaultRectangleHeight),
+			frontColor,
+			backColor,
+			(Bitmap shot, PortalGeometry _, out string detail) =>
+				LooksHardRectangle(shot, backColor, frontColor, out detail),
+			failures);
+		RunShape(
+			"圆形兼容模式",
+			PortalGeometry.Circle(radius),
+			frontColor,
+			backColor,
+			(Bitmap shot, PortalGeometry geometry, out string detail) =>
+				LooksCircular(shot, geometry.Radius, backColor, frontColor, out detail),
+			failures);
+	}
 
-		using var back = CreateColorWindow("PierceView Smoke Back", backColor, 120, 120, 720, 520);
-		using var front = CreateColorWindow("PierceView Smoke Front", frontColor, 160, 160, 640, 460);
+	private delegate bool FrameValidator(
+		Bitmap shot,
+		PortalGeometry geometry,
+		out string detail);
+
+	private static void RunShape(
+		string name,
+		PortalGeometry geometry,
+		Color frontColor,
+		Color backColor,
+		FrameValidator validateFrame,
+		List<string> failures)
+	{
+		using var back = CreateColorWindow($"PierceView Smoke Back - {name}", backColor, 120, 120, 720, 520);
+		using var front = CreateColorWindow($"PierceView Smoke Front - {name}", frontColor, 160, 160, 640, 460);
 		back.Show();
 		front.Show();
 		Application.DoEvents();
 		Thread.Sleep(250);
-
-		using var overlay = new DwmPortalOverlay(radius);
 		var center = new NativeMethods.Point(front.Left + front.Width / 2, front.Top + front.Height / 2);
+		using var overlay = new DwmPortalOverlay(geometry);
 
 		// 不调用 WindowRegionController：产品禁止锁自身进程窗口；形状判定只依赖分层圆 alpha。
 		if (!overlay.TryShow(back.Handle, front.Handle, center, out var showError))
 		{
-			failures.Add("显示透视失败：" + showError);
+			failures.Add($"{name}显示透视失败：{showError}");
 			return;
 		}
 
@@ -93,7 +123,7 @@ internal static class VisualSmokeTests
 		Application.DoEvents();
 
 		var blackishFrames = 0;
-		var nonCircularFrames = 0;
+		var invalidShapeFrames = 0;
 		var samples = 0;
 		const int moveCount = 48;
 
@@ -113,19 +143,20 @@ internal static class VisualSmokeTests
 			Application.DoEvents();
 			Thread.Sleep(16);
 
+			var bounds = geometry.CreateFrameBounds(point);
 			using var shot = CaptureScreenRect(
-				point.X - radius,
-				point.Y - radius,
-				diameter,
-				diameter);
+				bounds.Left,
+				bounds.Top,
+				geometry.FrameWidth,
+				geometry.FrameHeight);
 
 			samples++;
-			if (!LooksCircular(shot, radius, backColor, frontColor, out var shapeDetail))
+			if (!validateFrame(shot, geometry, out var shapeDetail))
 			{
-				nonCircularFrames++;
-				if (nonCircularFrames <= 4)
+				invalidShapeFrames++;
+				if (invalidShapeFrames <= 4)
 				{
-					Console.WriteLine($"形状告警 frame={i}: {shapeDetail}");
+					Console.WriteLine($"{name}形状告警 frame={i}: {shapeDetail}");
 				}
 			}
 
@@ -141,21 +172,21 @@ internal static class VisualSmokeTests
 		Application.DoEvents();
 
 		Console.WriteLine(
-			$"采样帧={samples}，疑似非圆={nonCircularFrames}，疑似过黑={blackishFrames}。");
+			$"{name}：采样帧={samples}，形状异常={invalidShapeFrames}，疑似过黑={blackishFrames}。");
 
 		if (samples < moveCount / 2)
 		{
-			failures.Add("有效采样过少。");
+			failures.Add($"{name}有效采样过少。");
 		}
 
-		if (nonCircularFrames > samples / 5)
+		if (invalidShapeFrames > samples / 5)
 		{
-			failures.Add($"非圆帧过多：{nonCircularFrames}/{samples}（透视可能变成方框）。");
+			failures.Add($"{name}形状异常帧过多：{invalidShapeFrames}/{samples}。");
 		}
 
 		if (blackishFrames > samples / 4)
 		{
-			failures.Add($"过黑帧过多：{blackishFrames}/{samples}（可能闪黑或捕获失败）。");
+			failures.Add($"{name}过黑帧过多：{blackishFrames}/{samples}（可能闪黑或捕获失败）。");
 		}
 	}
 
@@ -240,6 +271,32 @@ internal static class VisualSmokeTests
 		}
 
 		return true;
+	}
+
+	/// <summary>
+	/// 硬边矩形：四角与中心都应更像背景绿，不应残留前景红或透明圆角。
+	/// </summary>
+	private static bool LooksHardRectangle(
+		Bitmap shot,
+		Color backColor,
+		Color frontColor,
+		out string detail)
+	{
+		var samples = new[]
+		{
+			shot.GetPixel(2, 2),
+			shot.GetPixel(shot.Width - 3, 2),
+			shot.GetPixel(2, shot.Height - 3),
+			shot.GetPixel(shot.Width - 3, shot.Height - 3),
+			shot.GetPixel(shot.Width / 2, shot.Height / 2)
+		};
+		var backgroundLike = samples.Count(
+			color => ColorDistance(color, backColor) + 30 < ColorDistance(color, frontColor));
+		detail =
+			$"backgroundLike={backgroundLike}/5, " +
+			$"centerRGB=({samples[4].R},{samples[4].G},{samples[4].B}), " +
+			$"tlRGB=({samples[0].R},{samples[0].G},{samples[0].B})";
+		return backgroundLike >= 4;
 	}
 
 	private static int ColorDistance(Color a, Color b)

@@ -3,14 +3,20 @@ namespace WindowPortal;
 internal sealed class SettingsForm : Form
 {
     private readonly Func<UserSettings, bool> _saveSettings;
+    private readonly Label _shapeLabel = new();
+    private readonly ComboBox _shapeInput = new();
     private readonly Label _radiusLabel = new();
     private readonly Label _radiusHint = new();
     private readonly NumericUpDown _radiusInput = new();
+    private readonly Label _rectangleSizeLabel = new();
+    private readonly Label _rectangleSizeHint = new();
+    private readonly NumericUpDown _rectangleWidthInput = new();
+    private readonly NumericUpDown _rectangleHeightInput = new();
     private readonly Label _languageLabel = new();
     private readonly ComboBox _languageInput = new();
     private readonly Button _saveButton = new();
     private readonly Button _cancelButton = new();
-    private bool _updatingLanguage;
+    private bool _updatingUi;
 
     internal SettingsForm(
         UserSettings settings,
@@ -20,8 +26,8 @@ internal sealed class SettingsForm : Form
         _saveSettings = saveSettings;
 
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(400, 224);
-        MinimumSize = new Size(400, 224);
+        ClientSize = new Size(460, 336);
+        MinimumSize = new Size(460, 336);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -53,27 +59,48 @@ internal sealed class SettingsForm : Form
     private string Language =>
         _languageInput.SelectedIndex == 1 ? Localizer.English : Localizer.Chinese;
 
+    private string PortalMode =>
+        _shapeInput.SelectedIndex == 1 ? UserSettings.RectangleMode : UserSettings.CircleMode;
+
     private void BuildLayout()
     {
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 4,
+            RowCount = 7,
             Padding = new Padding(24, 22, 24, 18)
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        for (var row = 0; row < 6; row++)
+        {
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        }
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         Controls.Add(root);
+
+        _shapeLabel.AutoSize = true;
+        _shapeLabel.Anchor = AnchorStyles.Left;
+        _shapeLabel.Margin = new Padding(0, 4, 16, 4);
+        root.Controls.Add(_shapeLabel, 0, 0);
+
+        _shapeInput.DropDownStyle = ComboBoxStyle.DropDownList;
+        _shapeInput.Width = 190;
+        _shapeInput.Anchor = AnchorStyles.Right;
+        _shapeInput.SelectedIndexChanged += (_, _) =>
+        {
+            if (!_updatingUi)
+            {
+                UpdateModeEnabledState();
+            }
+        };
+        root.Controls.Add(_shapeInput, 1, 0);
 
         _radiusLabel.AutoSize = true;
         _radiusLabel.Anchor = AnchorStyles.Left;
         _radiusLabel.Margin = new Padding(0, 4, 16, 4);
-        root.Controls.Add(_radiusLabel, 0, 0);
+        root.Controls.Add(_radiusLabel, 0, 1);
 
         _radiusInput.Minimum = UserSettings.MinimumRadius;
         _radiusInput.Maximum = UserSettings.MaximumRadius;
@@ -81,30 +108,62 @@ internal sealed class SettingsForm : Form
         _radiusInput.Width = 96;
         _radiusInput.TextAlign = HorizontalAlignment.Right;
         _radiusInput.Anchor = AnchorStyles.Right;
-        root.Controls.Add(_radiusInput, 1, 0);
+        root.Controls.Add(_radiusInput, 1, 1);
 
         _radiusHint.AutoSize = true;
         _radiusHint.ForeColor = SystemColors.GrayText;
         _radiusHint.Margin = new Padding(0, 2, 0, 18);
         root.SetColumnSpan(_radiusHint, 2);
-        root.Controls.Add(_radiusHint, 0, 1);
+        root.Controls.Add(_radiusHint, 0, 2);
+
+        _rectangleSizeLabel.AutoSize = true;
+        _rectangleSizeLabel.Anchor = AnchorStyles.Left;
+        _rectangleSizeLabel.Margin = new Padding(0, 4, 16, 4);
+        root.Controls.Add(_rectangleSizeLabel, 0, 3);
+
+        ConfigureRectangleDimension(_rectangleWidthInput, UserSettings.MinimumRectangleWidth, UserSettings.MaximumRectangleWidth);
+        ConfigureRectangleDimension(_rectangleHeightInput, UserSettings.MinimumRectangleHeight, UserSettings.MaximumRectangleHeight);
+        var rectangleSizePanel = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            Anchor = AnchorStyles.Right,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = Padding.Empty
+        };
+        rectangleSizePanel.Controls.Add(_rectangleWidthInput);
+        rectangleSizePanel.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Text = "×",
+            Anchor = AnchorStyles.None,
+            Margin = new Padding(5, 6, 5, 0)
+        });
+        rectangleSizePanel.Controls.Add(_rectangleHeightInput);
+        root.Controls.Add(rectangleSizePanel, 1, 3);
+
+        _rectangleSizeHint.AutoSize = true;
+        _rectangleSizeHint.ForeColor = SystemColors.GrayText;
+        _rectangleSizeHint.Margin = new Padding(0, 2, 0, 18);
+        root.SetColumnSpan(_rectangleSizeHint, 2);
+        root.Controls.Add(_rectangleSizeHint, 0, 4);
 
         _languageLabel.AutoSize = true;
         _languageLabel.Anchor = AnchorStyles.Left;
         _languageLabel.Margin = new Padding(0, 4, 16, 4);
-        root.Controls.Add(_languageLabel, 0, 2);
+        root.Controls.Add(_languageLabel, 0, 5);
 
         _languageInput.DropDownStyle = ComboBoxStyle.DropDownList;
         _languageInput.Width = 140;
         _languageInput.Anchor = AnchorStyles.Right;
         _languageInput.SelectedIndexChanged += (_, _) =>
         {
-            if (!_updatingLanguage)
+            if (!_updatingUi)
             {
                 UpdateTexts();
             }
         };
-        root.Controls.Add(_languageInput, 1, 2);
+        root.Controls.Add(_languageInput, 1, 5);
 
         var buttons = new FlowLayoutPanel
         {
@@ -125,40 +184,86 @@ internal sealed class SettingsForm : Form
         buttons.Controls.Add(_saveButton);
         buttons.Controls.Add(_cancelButton);
         root.SetColumnSpan(buttons, 2);
-        root.Controls.Add(buttons, 0, 3);
+        root.Controls.Add(buttons, 0, 6);
+    }
+
+    private static void ConfigureRectangleDimension(
+        NumericUpDown input,
+        int minimum,
+        int maximum)
+    {
+        input.Minimum = minimum;
+        input.Maximum = maximum;
+        input.Increment = 10;
+        input.Width = 82;
+        input.TextAlign = HorizontalAlignment.Right;
     }
 
     private void ApplySettings(UserSettings settings)
     {
         var normalized = settings.Normalize();
         _radiusInput.Value = normalized.Radius;
-        _updatingLanguage = true;
+        _rectangleWidthInput.Value = normalized.RectangleWidth;
+        _rectangleHeightInput.Value = normalized.RectangleHeight;
+        _updatingUi = true;
+        _shapeInput.Items.Clear();
+        _shapeInput.Items.Add(string.Empty);
+        _shapeInput.Items.Add(string.Empty);
+        _shapeInput.SelectedIndex = normalized.PortalMode == UserSettings.RectangleMode ? 1 : 0;
         _languageInput.Items.Clear();
         _languageInput.Items.Add(Localizer.Get(Localizer.Chinese).ChineseLanguage);
         _languageInput.Items.Add(Localizer.Get(Localizer.English).EnglishLanguage);
         _languageInput.SelectedIndex = normalized.Language == Localizer.English ? 1 : 0;
-        _updatingLanguage = false;
+        _updatingUi = false;
         UpdateTexts();
     }
 
     private void UpdateTexts()
     {
         var text = Localizer.Get(Language);
+        var selectedShape = Math.Max(0, _shapeInput.SelectedIndex);
         Text = text.SettingsTitle;
+        _shapeLabel.Text = text.PortalShapeLabel;
+        _updatingUi = true;
+        _shapeInput.Items[0] = text.CircleShape;
+        _shapeInput.Items[1] = text.RectangleShape;
+        _shapeInput.SelectedIndex = selectedShape;
+        _updatingUi = false;
         _radiusLabel.Text = text.RadiusLabel;
         _radiusHint.Text = text.RadiusHint;
+        _rectangleSizeLabel.Text = text.RectangleSizeLabel;
+        _rectangleSizeHint.Text = text.RectangleSizeHint;
         _languageLabel.Text = text.LanguageLabel;
         _saveButton.Text = text.Save;
         _cancelButton.Text = text.Cancel;
+        _shapeInput.AccessibleName = text.PortalShapeLabel;
         _radiusInput.AccessibleName = text.RadiusLabel;
+        _rectangleWidthInput.AccessibleName = text.RectangleSizeLabel + " width";
+        _rectangleHeightInput.AccessibleName = text.RectangleSizeLabel + " height";
         _languageInput.AccessibleName = text.LanguageLabel;
+        UpdateModeEnabledState();
+    }
+
+    private void UpdateModeEnabledState()
+    {
+        var rectangle = PortalMode == UserSettings.RectangleMode;
+        _radiusLabel.Enabled = !rectangle;
+        _radiusHint.Enabled = !rectangle;
+        _radiusInput.Enabled = !rectangle;
+        _rectangleSizeLabel.Enabled = rectangle;
+        _rectangleSizeHint.Enabled = rectangle;
+        _rectangleWidthInput.Enabled = rectangle;
+        _rectangleHeightInput.Enabled = rectangle;
     }
 
     private void SaveAndClose()
     {
         var settings = new UserSettings(
             decimal.ToInt32(_radiusInput.Value),
-            Language);
+            Language,
+            PortalMode,
+            decimal.ToInt32(_rectangleWidthInput.Value),
+            decimal.ToInt32(_rectangleHeightInput.Value));
         if (!_saveSettings(settings))
         {
             return;

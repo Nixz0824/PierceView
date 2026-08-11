@@ -6,11 +6,11 @@
 
 ![寸镜 PierceView：按住 F8 查看并操作后台窗口 / Hold F8 to view and interact with the window behind](assets/readme/hero.svg)
 
-寸镜（PierceView）是一款轻量的 Windows 系统托盘效率工具。按住 `F8`，鼠标附近会出现一个圆形透视区域，让你不离开当前工作就能查看、滚动或点击紧贴在后方的一层窗口；松开按键，当前窗口立即恢复。
+寸镜（PierceView）是一款轻量的 Windows 系统托盘效率工具。按住 `F8`，鼠标附近会出现可选的矩形或圆形透视区域，让你不离开当前工作就能查看、滚动或点击紧贴在后方的一层窗口；松开按键，当前窗口立即恢复。
 
-PierceView is a lightweight Windows tray utility. Hold `F8` to open a circular portal around the pointer, then view, scroll, or click the single window directly behind your current work. Release the key to restore the foreground window immediately.
+PierceView is a lightweight Windows tray utility. Hold `F8` to open a selectable rectangular or circular portal around the pointer, then view, scroll, or click the single window directly behind your current work. Release the key to restore the foreground window immediately.
 
-**当前版本 / Current version:** `1.0.6` — 本地：每次启用弹出就绪提示。Local: ready tip on every enable.
+**公开版本 / Public release:** `1.0.6`　|　**本地开发版本 / Local development:** `2.0.0-alpha.1`
 
 ## 为什么是寸镜 / Why PierceView
 
@@ -28,13 +28,13 @@ Many `Alt+Tab` trips are not real context switches—you only need a number, a s
 ![寸镜 PierceView 工作流程：停留当前窗口、按住 F8、查看滚动点击、松开恢复 / PierceView workflow: stay, hold F8, interact, release](assets/readme/workflow.svg)
 
 1. 把鼠标移到想查看的位置。Move the pointer to the information you want.
-2. 按住 `F8` 打开并移动透视圆。Hold `F8` to open and move the portal.
-3. 在圆内查看、滚动或点击后方的一层普通窗口。View, scroll, or click the ordinary window directly behind it.
+2. 按住 `F8` 打开并移动透视区域。Hold `F8` to open and move the portal.
+3. 在透视区域内查看、滚动或点击后方的一层普通窗口。View, scroll, or click the ordinary window directly behind it.
 4. 松开 `F8`，关闭透视并恢复当前窗口。Release `F8` to close the portal and restore the foreground.
 
-1.0 使用单层圆形内核：一次 F8 会话只固定使用紧贴当前窗口后的一个视觉来源，不合成更深层窗口，也不动态切换来源。
+2.0 alpha 提供硬边矩形与 1.0 兼容圆形。两种形状仍使用同一个稳定的单层内核：一次 F8 会话只固定使用紧贴当前窗口后的一个视觉来源，不合成更深层窗口，也不动态切换来源。
 
-Version 1.0 uses a single-layer circular core. Each F8 session keeps one visual source—the window directly behind the foreground—and does not composite or switch to deeper layers.
+The 2.0 alpha adds a hard-edged rectangle alongside the 1.0-compatible circle. Both shapes keep the stable single-layer core: each F8 session uses one fixed visual source directly behind the foreground and does not composite or switch to deeper layers.
 
 ## 下载 / Download
 
@@ -58,14 +58,14 @@ The current build is not Authenticode-signed, so Windows may show “Unknown pub
 3. 按住 `F8` 开启透视，松开恢复。Hold `F8` to open the portal; release it to restore.
 4. 双击托盘图标打开设置；右键可启动/暂停、查看帮助或退出。Double-click the tray icon for settings; right-click to start/pause, open Help, or exit.
 
-设置只有透视圆半径与界面语言两项，保存在 `%LOCALAPPDATA%\PierceView\settings.json`。PierceView stores only the portal radius and UI language in that local settings file.
+设置包含透视形状、圆形半径或矩形宽高，以及界面语言；配置保存在 `%LOCALAPPDATA%\PierceView\settings.json`。Settings include portal shape, circle radius or rectangle dimensions, and UI language; the configuration stays in that local file.
 
 ## 能做什么 / Features
 
-| 能力 / Capability | 1.0 行为 / Version 1.0 behavior |
+| 能力 / Capability | 2.0 alpha 行为 / Version 2.0 alpha behavior |
 |---|---|
 | 系统托盘 / System tray | 普通启动无主窗口；提供启动/暂停、设置、帮助与退出。No persistent main window; Start/Pause, Settings, Help, and Exit live in the tray. |
-| 单层透视 / Single-layer portal | 圆内显示紧贴当前窗口后的一层普通桌面窗口。Shows the ordinary window directly behind the foreground. |
+| 单层透视 / Single-layer portal | 可选硬边矩形或 1.0 兼容圆形，显示紧贴当前窗口后的一层普通桌面窗口。Choose a hard-edged rectangle or 1.0-compatible circle to show the ordinary window directly behind the foreground. |
 | 后台交互 / Background interaction | 允许真实滚动与点击，并尽量保持宿主窗口前台与层级。Passes real scroll/click input while preserving the host foreground and Z-order where Windows allows it. |
 | 跨应用拖放 / Cross-app drag-and-drop | 两端应用与权限都兼容时可用；并非所有文字、图片、文件或网页都支持。Works when both apps and privilege levels support the same native drag format. |
 | 双语界面 / Bilingual UI | 托盘、设置、首次提示与帮助支持简体中文和 English。Tray, Settings, first-run hint, and Help support Simplified Chinese and English. |
@@ -122,7 +122,7 @@ dotnet .\src\WindowPortal\bin\Release\net8.0-windows\PierceView.dll --list-windo
 
 Public docs keep only what users and everyday contributors need:
 
-- [架构 / Architecture](docs/ARCHITECTURE.md) — 1.0 单层圆形透视如何工作 / how the 1.0 single-layer circular portal works
+- [架构 / Architecture](docs/ARCHITECTURE.md) — 2.0 单层圆形/矩形透视如何工作 / how the 2.0 single-layer circle/rectangle portal works
 - [兼容性 / Compatibility](docs/COMPATIBILITY.md) — 适用窗口与已知边界 / supported windows and known boundaries
 - [安全模型 / Security model](docs/SECURITY.md) — 权限、能力边界与安全报告方式 / privileges, capability boundaries, and how to report issues
 - [变更记录 / Changelog](CHANGELOG.md)

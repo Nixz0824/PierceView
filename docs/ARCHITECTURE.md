@@ -1,8 +1,8 @@
-# 寸镜 / PierceView 1.0 架构说明
+# 寸镜 / PierceView 2.0 架构说明
 
-Architecture notes for the public **1.0** single-layer circular portal. This page describes how the shipping build works—not internal product roadmaps.
+Architecture notes for the **2.0 alpha** single-layer circle/rectangle portal. This page describes the current local development build—not internal product roadmaps.
 
-本页说明当前公开发布的 **1.0** 单层圆形透视如何工作，不包含内部产品路线。
+本页说明当前本地开发的 **2.0 alpha** 单层圆形/矩形透视如何工作，不包含内部产品路线。
 
 ## 总体结构 / Overview
 
@@ -10,17 +10,17 @@ Architecture notes for the public **1.0** single-layer circular portal. This pag
 托盘 UI 线程 / Tray UI thread
   ├─ NotifyIcon：启动/暂停、设置、帮助、退出
   │  Start/Pause, Settings, Help, Exit
-  ├─ SettingsForm：半径、语言 / radius, language
+  ├─ SettingsForm：形状、半径/矩形尺寸、语言 / shape, size, language
   └─ PortalRuntime：启动/停止工作线程 / start/stop worker
 
 单层运行线程 / Single-layer runtime thread
   ├─ GetAsyncKeyState(F8) + 鼠标坐标 / pointer position
-  ├─ WindowRegionController：在宿主 region 中减去圆
-  │  subtract a circle from the host window region
+  ├─ WindowRegionController：在宿主 region 中减去所选形状
+  │  subtract the selected shape from the host window region
   └─ DwmPortalOverlay：复制固定的后方一层来源
        copy the fixed one-layer-behind source
-       ├─ 屏外 DWM 捕获面（单张缩略图）→ 圆 alpha 蒙版 → UpdateLayeredWindow 整帧提交
-       │  off-screen DWM capture → circular alpha mask → layered present
+       ├─ 屏外 DWM 捕获面（单张缩略图）→ 形状 alpha 蒙版 → UpdateLayeredWindow 整帧提交
+       │  off-screen DWM capture → shape alpha mask → layered present
        ├─ NonActivatingWindowGuard：临时 WS_EX_NOACTIVATE
        └─ ForegroundZOrderGuard：WinEvent 恢复宿主前台
 ```
@@ -34,10 +34,10 @@ On normal launch, `Program` creates a single-instance mutex and `PierceViewAppli
 ## 单层透视数据流 / Single-layer data flow
 
 1. F8 首次按下时，`WindowRegionController` 锁定鼠标下的宿主顶层 HWND，并保存其原始 region。On first F8 press, lock the top-level host HWND under the pointer and save its original region.
-2. 在宿主 region 中减去圆后，`WindowFromPoint` 得到该位置当前暴露的后方一层顶层窗口。After subtracting the circle, resolve the one top-level window now exposed behind the host.
+2. 在宿主 region 中减去所选圆形或矩形后，`WindowFromPoint` 得到该位置当前暴露的后方一层顶层窗口。After subtracting the selected circle or rectangle, resolve the one top-level window now exposed behind the host.
 3. 本次 F8 会话固定使用这个来源，不枚举或切换更深窗口。That source stays fixed for the hold session; deeper windows are not scanned or switched to.
-4. `DwmPortalOverlay` 用 DWM thumbnail 把来源窗口对应区域画到圆形预览窗。DWM thumbnails paint the matching source region into the circular preview.
-5. 预览在屏外窗更新单张 DWM 缩略图，抓帧后做圆形预乘 alpha，再用 `UpdateLayeredWindow` 一次提交（1.0.5）。形状不依赖 `SetWindowRgn` 是否裁切 DWM。Capture one DWM thumbnail off-screen, apply circular premultiplied alpha, present with `UpdateLayeredWindow` (1.0.5).
+4. `DwmPortalOverlay` 用 DWM thumbnail 把来源窗口对应区域画到所选形状的预览窗。DWM thumbnails paint the matching source region into the selected portal shape.
+5. 预览在屏外窗更新单张 DWM 缩略图，抓帧后做形状预乘 alpha，再用 `UpdateLayeredWindow` 一次提交。圆形完整沿用 1.0.6 管线；2.0 硬边矩形使用同一整帧路径。Capture one DWM thumbnail off-screen, apply shape premultiplied alpha, then present once with `UpdateLayeredWindow`. The circle retains the 1.0.6 pipeline; the 2.0 hard rectangle uses the same full-frame path.
 6. 松开 F8 时先隐藏预览，再恢复宿主 region 和来源扩展样式。On release, hide the preview, then restore the host region and source extended styles.
 
 ## 交互与前台保护 / Input and foreground protection

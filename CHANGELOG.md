@@ -10,6 +10,20 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 - （暂无）
 
+## [2.0.0-alpha.1] - 2026-08-11
+
+### Added
+
+- 新增可选的单层硬边矩形透视，默认尺寸为 420×280，可在设置中调整宽高。
+- Add an optional single-layer hard-edged rectangular portal, defaulting to 420×280 with configurable width and height.
+- 设置新增透视形状选择；新安装默认矩形，已有 1.x 配置继续使用圆形兼容模式。
+- Add portal-shape selection. New installs default to rectangle; existing 1.x settings remain on the compatible circle mode.
+
+### Compatibility
+
+- 圆形模式完整保留 1.0.6 的单张 DWM 捕获、预乘 alpha 与整帧 `UpdateLayeredWindow` 合成路径。
+- Circle mode preserves the 1.0.6 single-DWM-capture, premultiplied-alpha, full-frame `UpdateLayeredWindow` pipeline.
+
 ## [1.0.6] - 2026-08-10
 
 ### Changed

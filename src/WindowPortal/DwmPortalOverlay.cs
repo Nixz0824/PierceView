@@ -9,15 +9,17 @@ using System.Windows.Forms;
 namespace WindowPortal;
 
 /// <summary>
-/// DWM 圆形透视预览（1.0.5）。
+/// DWM 单层透视预览。圆形沿用 1.0.5 稳定路径，2.0 增加同管线矩形模式。
 /// 不用条带（条带重影）、不用「全幅+Region/双缓冲换帧」（易变方、闪圆）。
-/// 流程：屏外捕获窗上挂单张 DWM 缩略图 → 抓成位图 → CPU 圆蒙版预乘 alpha
-/// → UpdateLayeredWindow 一次提交整帧。形状与内容同帧，避免方圆叠影与换帧闪烁。
+/// 流程：屏外捕获窗上挂单张 DWM 缩略图 → 抓成位图 → CPU 形状蒙版预乘 alpha
+/// → UpdateLayeredWindow 一次提交整帧。形状与内容同帧，避免叠影与换帧闪烁。
 /// </summary>
 internal sealed class DwmPortalOverlay : IDisposable
 {
 	private sealed class PortalOverlayManager : Form
 	{
+		private readonly PortalGeometry _geometry;
+
 		private CaptureSurface? _capture;
 
 		private LayeredPortalForm? _display;
@@ -42,8 +44,9 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		internal int BackgroundPromotionCount => _foregroundGuard.PromotionCount;
 
-		internal PortalOverlayManager()
+		internal PortalOverlayManager(PortalGeometry geometry)
 		{
+			_geometry = geometry;
 			FormBorderStyle = FormBorderStyle.None;
 			ShowInTaskbar = false;
 			StartPosition = FormStartPosition.Manual;
@@ -60,19 +63,18 @@ internal sealed class DwmPortalOverlay : IDisposable
 			nint sourceWindow,
 			nint protectedWindow,
 			NativeMethods.Point screenCenter,
-			int radius,
 			out string? error)
 		{
 			HidePortal();
 			SourceWindow = sourceWindow;
-			if (!_foregroundGuard.TryEnable(sourceWindow, protectedWindow, screenCenter, radius, out error))
+			if (!_foregroundGuard.TryEnable(sourceWindow, protectedWindow, screenCenter, _geometry.GuardRadius, out error))
 			{
 				HidePortal();
 				return false;
 			}
 
-			_capture = new CaptureSurface(radius);
-			_display = new LayeredPortalForm(radius);
+			_capture = new CaptureSurface(_geometry);
+			_display = new LayeredPortalForm(_geometry);
 			if (!_capture.TryRegisterSource(sourceWindow, out error))
 			{
 				HidePortal();
@@ -86,7 +88,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 				return false;
 			}
 
-			if (!TryPresentFrame(rect, screenCenter, radius, out error))
+			if (!TryPresentFrame(rect, screenCenter, out error))
 			{
 				HidePortal();
 				return false;
@@ -102,10 +104,9 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		internal bool TryUpdatePortal(
 			NativeMethods.Point screenCenter,
-			int radius,
 			out string? error)
 		{
-			_foregroundGuard.UpdatePortalGeometry(screenCenter, radius);
+			_foregroundGuard.UpdatePortalGeometry(screenCenter, _geometry.GuardRadius);
 
 			if (!_portalVisible ||
 			    _capture is null ||
@@ -124,7 +125,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 				return true;
 			}
 
-			if (!TryPresentFrame(rect, screenCenter, radius, out error))
+			if (!TryPresentFrame(rect, screenCenter, out error))
 			{
 				return false;
 			}
@@ -165,7 +166,6 @@ internal sealed class DwmPortalOverlay : IDisposable
 		private bool TryPresentFrame(
 			NativeMethods.Rect sourceWindowRect,
 			NativeMethods.Point screenCenter,
-			int radius,
 			out string? error)
 		{
 			if (_capture is null || _display is null)
@@ -174,7 +174,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 				return false;
 			}
 
-			if (!_capture.TryUpdateSource(sourceWindowRect, screenCenter, radius, out error))
+			if (!_capture.TryUpdateSource(sourceWindowRect, screenCenter, out error))
 			{
 				return false;
 			}
@@ -193,8 +193,9 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 			using (frame)
 			{
-				CircularFrameComposer.ApplyCircularPremultipliedAlpha(frame, radius);
-				if (!_display.TryPresent(frame, screenCenter.X - radius, screenCenter.Y - radius, out error))
+				PortalFrameComposer.ApplyPremultipliedAlpha(frame, _geometry);
+				var bounds = _geometry.CreateFrameBounds(screenCenter);
+				if (!_display.TryPresent(frame, bounds.Left, bounds.Top, out error))
 				{
 					return false;
 				}
@@ -217,15 +218,21 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		private const int Offscreen = -32000;
 
-		private readonly int _diameter;
+		private readonly PortalGeometry _geometry;
+
+		private readonly int _width;
+
+		private readonly int _height;
 
 		private readonly CaptureHostForm _host;
 
 		private nint _thumbnail;
 
-		internal CaptureSurface(int radius)
+		internal CaptureSurface(PortalGeometry geometry)
 		{
-			_diameter = checked(radius * 2 + 1);
+			_geometry = geometry;
+			_width = geometry.FrameWidth;
+			_height = geometry.FrameHeight;
 			_host = new CaptureHostForm
 			{
 				FormBorderStyle = FormBorderStyle.None,
@@ -234,7 +241,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 				AutoScaleMode = AutoScaleMode.None,
 				BackColor = Color.Black,
 				TopMost = false,
-				Bounds = new Rectangle(Offscreen, Offscreen, _diameter, _diameter)
+				Bounds = new Rectangle(Offscreen, Offscreen, _width, _height)
 			};
 			// 强制创建句柄并显示在屏外，DWM 缩略图需要目标窗可合成
 			_ = _host.Handle;
@@ -243,8 +250,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 				nint.Zero,
 				Offscreen,
 				Offscreen,
-				_diameter,
-				_diameter,
+				_width,
+				_height,
 				NativeMethods.SwpNoActivate |
 				NativeMethods.SwpNoOwnerZOrder |
 				NativeMethods.SwpNoZOrder |
@@ -268,7 +275,6 @@ internal sealed class DwmPortalOverlay : IDisposable
 		internal bool TryUpdateSource(
 			NativeMethods.Rect sourceWindowRect,
 			NativeMethods.Point screenCenter,
-			int radius,
 			out string? error)
 		{
 			if (_thumbnail == nint.Zero)
@@ -277,11 +283,12 @@ internal sealed class DwmPortalOverlay : IDisposable
 				return false;
 			}
 
+			var frame = _geometry.CreateFrameBounds(screenCenter);
 			var source = new NativeMethods.Rect(
-				screenCenter.X - radius - sourceWindowRect.Left,
-				screenCenter.Y - radius - sourceWindowRect.Top,
-				screenCenter.X - radius - sourceWindowRect.Left + _diameter,
-				screenCenter.Y - radius - sourceWindowRect.Top + _diameter);
+				frame.Left - sourceWindowRect.Left,
+				frame.Top - sourceWindowRect.Top,
+				frame.Right - sourceWindowRect.Left,
+				frame.Bottom - sourceWindowRect.Top);
 
 			var properties = new NativeMethods.DwmThumbnailProperties
 			{
@@ -290,7 +297,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 				        NativeMethods.DwmTnpOpacity |
 				        NativeMethods.DwmTnpVisible |
 				        NativeMethods.DwmTnpSourceClientAreaOnly,
-				Destination = new NativeMethods.Rect(0, 0, _diameter, _diameter),
+				Destination = new NativeMethods.Rect(0, 0, _width, _height),
 				Source = source,
 				Opacity = byte.MaxValue,
 				Visible = true,
@@ -310,7 +317,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		internal bool TryGrabFrame(out Bitmap frame, out string? error)
 		{
-			frame = new Bitmap(_diameter, _diameter, PixelFormat.Format32bppArgb);
+			frame = new Bitmap(_width, _height, PixelFormat.Format32bppArgb);
 			var ok = false;
 			try
 			{
@@ -335,8 +342,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 									hdc,
 									0,
 									0,
-									_diameter,
-									_diameter,
+									_width,
+									_height,
 									windowDc,
 									0,
 									0,
@@ -417,7 +424,9 @@ internal sealed class DwmPortalOverlay : IDisposable
 	/// </summary>
 	private sealed class LayeredPortalForm : Form
 	{
-		private readonly int _diameter;
+		private readonly int _width;
+
+		private readonly int _height;
 
 		protected override bool ShowWithoutActivation => true;
 
@@ -432,24 +441,25 @@ internal sealed class DwmPortalOverlay : IDisposable
 			}
 		}
 
-		internal LayeredPortalForm(int radius)
+		internal LayeredPortalForm(PortalGeometry geometry)
 		{
-			_diameter = checked(radius * 2 + 1);
+			_width = geometry.FrameWidth;
+			_height = geometry.FrameHeight;
 			FormBorderStyle = FormBorderStyle.None;
 			ShowInTaskbar = false;
 			StartPosition = FormStartPosition.Manual;
 			AutoScaleMode = AutoScaleMode.None;
 			BackColor = Color.Black;
 			TopMost = true;
-			Bounds = new Rectangle(-32000, -32000, _diameter, _diameter);
+			Bounds = new Rectangle(-32000, -32000, _width, _height);
 			_ = Handle;
 		}
 
 		internal bool TryPresent(Bitmap frame, int left, int top, out string? error)
 		{
-			if (frame.Width != _diameter || frame.Height != _diameter)
+			if (frame.Width != _width || frame.Height != _height)
 			{
-				error = "捕获帧尺寸与透视圆不一致。";
+				error = "捕获帧尺寸与透视区域不一致。";
 				return false;
 			}
 
@@ -480,7 +490,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 			try
 			{
 				var dst = new NativeMethods.Point(left, top);
-				var size = new NativeMethods.Size(_diameter, _diameter);
+				var size = new NativeMethods.Size(_width, _height);
 				var src = new NativeMethods.Point(0, 0);
 				var blend = new NativeMethods.BlendFunction
 				{
@@ -631,11 +641,11 @@ internal sealed class DwmPortalOverlay : IDisposable
 		}
 	}
 
-	private static class CircularFrameComposer
+	private static class PortalFrameComposer
 	{
-		internal static void ApplyCircularPremultipliedAlpha(Bitmap frame, int radius)
+		internal static void ApplyPremultipliedAlpha(Bitmap frame, PortalGeometry geometry)
 		{
-			var diameter = frame.Width;
+			var radius = geometry.Radius;
 			var radiusSquared = (long)radius * radius;
 			var data = frame.LockBits(
 				new Rectangle(0, 0, frame.Width, frame.Height),
@@ -647,15 +657,16 @@ internal sealed class DwmPortalOverlay : IDisposable
 				var buffer = new byte[stride * frame.Height];
 				Marshal.Copy(data.Scan0, buffer, 0, buffer.Length);
 
-				for (var y = 0; y < diameter; y++)
+				for (var y = 0; y < frame.Height; y++)
 				{
 					var dy = y - radius;
 					var row = y * stride;
-					for (var x = 0; x < diameter; x++)
+					for (var x = 0; x < frame.Width; x++)
 					{
 						var dx = x - radius;
 						var i = row + (x * 4);
-						if (((long)dx * dx) + ((long)dy * dy) > radiusSquared)
+						if (geometry.Shape == PortalShape.Circle &&
+						    ((long)dx * dx) + ((long)dy * dy) > radiusSquared)
 						{
 							buffer[i] = 0;
 							buffer[i + 1] = 0;
@@ -664,7 +675,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 							continue;
 						}
 
-						// 预乘 alpha（不透明圆内）
+						// 硬边矩形与圆内像素均完全不透明。
 						var b = buffer[i];
 						var g = buffer[i + 1];
 						var r = buffer[i + 2];
@@ -684,7 +695,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 		}
 	}
 
-	private readonly int _radius;
+	private readonly PortalGeometry _geometry;
 
 	private readonly Thread _thread;
 
@@ -707,8 +718,13 @@ internal sealed class DwmPortalOverlay : IDisposable
 	internal int BackgroundPromotionCount => Invoke(static manager => manager.BackgroundPromotionCount);
 
 	internal DwmPortalOverlay(int radius)
+		: this(PortalGeometry.Circle(radius))
 	{
-		_radius = radius;
+	}
+
+	internal DwmPortalOverlay(PortalGeometry geometry)
+	{
+		_geometry = geometry;
 		_thread = new Thread(RunMessageLoop)
 		{
 			IsBackground = true,
@@ -727,14 +743,14 @@ internal sealed class DwmPortalOverlay : IDisposable
 	{
 		if (sourceWindow == nint.Zero || !NativeMethods.IsWindow(sourceWindow))
 		{
-			error = "圆洞下方没有可用于视觉预览的窗口。";
+			error = "透视区域下方没有可用于视觉预览的窗口。";
 			return false;
 		}
 
 		try
 		{
 			var result = Invoke(manager =>
-				manager.TryShowPortal(sourceWindow, protectedWindow, screenCenter, _radius, out var detail)
+				manager.TryShowPortal(sourceWindow, protectedWindow, screenCenter, out var detail)
 					? (true, detail)
 					: (false, detail));
 			error = result.Item2;
@@ -752,7 +768,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 		try
 		{
 			var result = Invoke(manager =>
-				manager.TryUpdatePortal(screenCenter, _radius, out var detail)
+				manager.TryUpdatePortal(screenCenter, out var detail)
 					? (true, detail)
 					: (false, detail));
 			error = result.Item2;
@@ -817,7 +833,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 	{
 		try
 		{
-			_manager = new PortalOverlayManager();
+			_manager = new PortalOverlayManager(_geometry);
 			_applicationContext = new ApplicationContext(_manager);
 			_ready.Set();
 			Application.Run(_applicationContext);

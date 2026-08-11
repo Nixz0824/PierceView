@@ -11,7 +11,7 @@ internal sealed class PortalRuntime : IDisposable
 
     internal event Action<string>? ErrorOccurred;
 
-    internal void Start(int radius, int pollMilliseconds)
+    internal void Start(PortalGeometry geometry, int pollMilliseconds)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         lock (_sync)
@@ -22,7 +22,7 @@ internal sealed class PortalRuntime : IDisposable
             }
 
             _stopRequested = false;
-            _thread = new Thread(() => Run(radius, pollMilliseconds))
+            _thread = new Thread(() => Run(geometry, pollMilliseconds))
             {
                 IsBackground = true,
                 Name = "PierceView single-layer runtime"
@@ -32,14 +32,14 @@ internal sealed class PortalRuntime : IDisposable
         }
     }
 
-    internal bool Restart(int radius, int pollMilliseconds)
+    internal bool Restart(PortalGeometry geometry, int pollMilliseconds)
     {
         if (!Stop())
         {
             return false;
         }
 
-        Start(radius, pollMilliseconds);
+        Start(geometry, pollMilliseconds);
         return true;
     }
 
@@ -72,10 +72,10 @@ internal sealed class PortalRuntime : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private void Run(int radius, int pollMilliseconds)
+    private void Run(PortalGeometry geometry, int pollMilliseconds)
     {
-        using var controller = new WindowRegionController(radius);
-        using var visualOverlay = new DwmPortalOverlay(radius);
+        using var controller = new WindowRegionController(geometry);
+        using var visualOverlay = new DwmPortalOverlay(geometry);
         var wasActivationHeld = false;
         var visualWarningShown = false;
         try

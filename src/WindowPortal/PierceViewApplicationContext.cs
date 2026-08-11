@@ -116,7 +116,7 @@ internal sealed class PierceViewApplicationContext : ApplicationContext
     {
         try
         {
-            _runtime.Start(_settings.Radius, _pollMilliseconds);
+            _runtime.Start(_settings.CreateGeometry(), _pollMilliseconds);
             _runtimeEnabled = true;
         }
         catch (Exception exception)
@@ -171,7 +171,7 @@ internal sealed class PierceViewApplicationContext : ApplicationContext
             return false;
         }
 
-        if (_runtimeEnabled && !_runtime.Restart(_settings.Radius, _pollMilliseconds))
+        if (_runtimeEnabled && !_runtime.Restart(_settings.CreateGeometry(), _pollMilliseconds))
         {
             _runtimeEnabled = false;
             ShowRuntimeError("The portal runtime did not stop in time.");
