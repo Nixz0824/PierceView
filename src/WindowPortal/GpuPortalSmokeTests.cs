@@ -29,6 +29,13 @@ internal static class GpuPortalSmokeTests
         try
         {
             using var overlay = new GpuPortalOverlay(geometry);
+            if (!overlay.HasInputPassThrough)
+            {
+                Console.Error.WriteLine(
+                    "GPU 透视窗未返回 HTTRANSPARENT/MA_NOACTIVATE。");
+                return 16;
+            }
+
             if (!overlay.TryShow(
                     sourceWindow,
                     protectedWindow,
@@ -72,6 +79,7 @@ internal static class GpuPortalSmokeTests
 
             var capturedFrames = overlay.CapturedFrames;
             var presentedFrames = overlay.PresentedFrames;
+            var canvasRelocations = overlay.CanvasRelocationCount;
             updateDurations.Sort();
             var p95 = Percentile(updateDurations, 0.95);
             var p99 = Percentile(updateDurations, 0.99);
@@ -79,6 +87,7 @@ internal static class GpuPortalSmokeTests
             Console.WriteLine(
                 $"调度={updates}，WGC 新帧={capturedFrames}，" +
                 $"GPU 透视提交={presentedFrames}，" +
+                $"画布重定位={canvasRelocations}，" +
                 $"P95={p95:F2}ms，P99={p99:F2}ms，" +
                 $"最慢={maximumUpdateMilliseconds:F2}ms，" +
                 $"高精度定时={highResolutionWaiter.IsHighResolution}。");
@@ -88,7 +97,15 @@ internal static class GpuPortalSmokeTests
                 return 18;
             }
 
-            Console.WriteLine("GPU 常驻纹理 + 独立鼠标裁剪 + 羽化着色器冒烟通过。");
+            if (canvasRelocations > 1)
+            {
+                Console.Error.WriteLine(
+                    $"192px 安全边界内不应重复移动 GPU 窗口，实际={canvasRelocations}。");
+                return 18;
+            }
+
+            Console.WriteLine(
+                "GPU 常驻纹理 + 稳定画布 + 输入穿透 + 羽化着色器冒烟通过。");
             return 0;
         }
         catch (Exception exception)

@@ -112,6 +112,22 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 - 视觉冒烟新增稳定画布重定位、缓存即时提交和旧位置清除断言；真实鼠标/Hover 坐标采样为 `0/384` 异常，四种形状无黑帧或形状异常，最终换帧平均约 `5.17–5.28ms`、最慢 `9.12ms`。
 - Visual smoke now asserts stable-canvas relocation, immediate cached presentation, and stale-position cleanup. Real-pointer/hover alignment reports `0/384` mismatches; all four shapes have no black or invalid frames, with final average updates around `5.17–5.28ms` and a `9.12ms` maximum.
+## [2.1.0-alpha.7] - 2026-08-11
+
+### Fixed
+
+- 修复 GPU 覆盖窗拦截鼠标输入：窗口对 `WM_NCHITTEST` 返回 `HTTRANSPARENT`，并以 `MA_NOACTIVATE` 拒绝激活，使宿主的小型交互孔重新获得真实点击、滚动和拖放入口。
+- Fix the GPU overlay intercepting pointer input by returning `HTTRANSPARENT` for `WM_NCHITTEST` and refusing activation with `MA_NOACTIVATE`, restoring real click, scroll, and drag entry through the host's small input aperture.
+- 修复移动鼠标时透视内容轻微整体偏移：GPU 交换链改为带 192 像素安全余量的稳定画布，安全范围内只在同一次 shader/Present 提交中移动透视中心和采样坐标，不再逐像素移动原生 HWND。
+- Fix slight whole-image drift during pointer motion by using a stable GPU swap-chain canvas with a 192 px safety margin. Within that range, the portal center and sampling coordinates move in the same shader/Present submission without pixel-by-pixel native HWND moves.
+
+### Tests
+
+- 自检新增 GPU 稳定画布边界测试；GPU 透视冒烟新增 `HTTRANSPARENT`/`MA_NOACTIVATE` 输入探针和画布重定位计数断言。
+- Add a GPU stable-canvas boundary self-test plus `HTTRANSPARENT`/`MA_NOACTIVATE` input probes and a canvas-relocation assertion to the GPU portal smoke test.
+- 2560×1440 @ 260Hz、RTX 5070 实机：4 秒调度 1622 次、GPU 提交 717 帧、画布仅首帧重定位 1 次；更新耗时 P95 0.13ms、P99 0.20ms。
+- On a 2560×1440 @ 260Hz RTX 5070 system, the 4-second run schedules 1,622 updates, presents 717 GPU frames, and relocates the canvas only once on the first frame; update latency is P95 0.13ms and P99 0.20ms.
+
 ## [2.1.0-alpha.6] - 2026-08-11
 
 ### Added

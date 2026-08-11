@@ -228,6 +228,13 @@ internal static class NativeMethods
 	[return: MarshalAs(UnmanagedType.Bool)]
 	internal static extern bool SetWindowPos(nint window, nint insertAfter, int x, int y, int width, int height, uint flags);
 
+	[DllImport("user32.dll", CharSet = CharSet.Unicode)]
+	internal static extern nint SendMessage(
+		nint window,
+		int message,
+		nint wParam,
+		nint lParam);
+
 	[DllImport("user32.dll", SetLastError = true)]
 	internal static extern nint BeginDeferWindowPos(int windowCount);
 

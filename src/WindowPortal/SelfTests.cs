@@ -43,6 +43,32 @@ internal static class SelfTests
             return options.GpuPortalSmokeWindow == 0x1234;
         }, failures, ref total);
 
+        Check("GPU 稳定画布安全边界", () =>
+        {
+            var geometry = PortalGeometry.Circle(204, 24);
+            var initialCenter = new NativeMethods.Point(1000, 800);
+            var canvasWidth = geometry.FrameWidth +
+                              (GpuPortalOverlay.OverscanMargin * 2);
+            var canvasHeight = geometry.FrameHeight +
+                               (GpuPortalOverlay.OverscanMargin * 2);
+            var canvas = GpuPortalOverlay.CreateCenteredCanvasBounds(
+                initialCenter,
+                canvasWidth,
+                canvasHeight);
+            var insideCenter = new NativeMethods.Point(
+                initialCenter.X + GpuPortalOverlay.OverscanMargin,
+                initialCenter.Y - GpuPortalOverlay.OverscanMargin);
+            var outsideCenter = new NativeMethods.Point(
+                insideCenter.X + 1,
+                insideCenter.Y);
+            return GpuPortalOverlay.Contains(
+                       canvas,
+                       geometry.CreateFrameBounds(insideCenter)) &&
+                   !GpuPortalOverlay.Contains(
+                       canvas,
+                       geometry.CreateFrameBounds(outsideCenter));
+        }, failures, ref total);
+
         Check(
             "十六进制窗口句柄",
             () => PortalOptions.ParseWindowHandle("0x1234") == 0x1234,

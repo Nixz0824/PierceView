@@ -18,12 +18,15 @@ namespace WindowPortal;
 /// </summary>
 internal sealed class GpuPortalOverlay : IDisposable
 {
+    internal const int OverscanMargin = 192;
+
     private const string ShaderSource = """
         cbuffer PortalParameters : register(b0)
         {
             float4 SourceData; // origin x/y, texture width/height
-            float4 OutputData; // output width/height, shape (0 circle), feather
+            float4 OutputData; // canvas width/height, shape (0 circle), feather
             float4 ShapeData;  // corner radius, circle radius, unused, unused
+            float4 PortalData; // portal width/height, local center x/y
         };
 
         Texture2D<float4> SourceTexture : register(t0);
@@ -35,10 +38,14 @@ internal sealed class GpuPortalOverlay : IDisposable
             return float4(corner.x * 2.0 - 1.0, 1.0 - corner.y * 2.0, 0.0, 1.0);
         }
 
-        float RoundedRectangleDistance(float2 pixel, float2 outputSize, float radius)
+        float RoundedRectangleDistance(
+            float2 pixel,
+            float2 center,
+            float2 portalSize,
+            float radius)
         {
-            float2 center = (outputSize - 1.0) * 0.5;
-            float2 straightHalfExtent = center - radius;
+            float2 halfExtent = (portalSize - 1.0) * 0.5;
+            float2 straightHalfExtent = max(halfExtent - radius, 0.0);
             float2 q = abs(pixel - center) - straightHalfExtent;
             return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
         }
@@ -58,13 +65,14 @@ internal sealed class GpuPortalOverlay : IDisposable
             float signedDistance;
             if (OutputData.z < 0.5)
             {
-                signedDistance = length(pixel - ShapeData.yy) - ShapeData.y;
+                signedDistance = length(pixel - PortalData.zw) - ShapeData.y;
             }
             else
             {
                 signedDistance = RoundedRectangleDistance(
                     pixel,
-                    OutputData.xy,
+                    PortalData.zw,
+                    PortalData.xy,
                     ShapeData.x);
             }
 
@@ -82,6 +90,8 @@ internal sealed class GpuPortalOverlay : IDisposable
 
     private readonly object gpuLock = new();
     private readonly PortalGeometry geometry;
+    private readonly int canvasWidth;
+    private readonly int canvasHeight;
     private readonly GpuDeviceResources resources;
     private readonly PortalGpuForm form;
     private readonly IDXGISwapChain1 swapChain;
@@ -100,10 +110,12 @@ internal sealed class GpuPortalOverlay : IDisposable
     private GraphicsCaptureItem? captureItem;
     private ID3D11Texture2D? latestTexture;
     private ID3D11ShaderResourceView? latestTextureView;
+    private NativeMethods.Rect? canvasBounds;
     private NativeMethods.Point? lastPresentedCenter;
     private long latestCaptureSerial;
     private long presentedCaptureSerial;
     private long presentedFrames;
+    private int canvasRelocationCount;
     private bool active;
     private bool windowShown;
     private bool disposed;
@@ -112,6 +124,8 @@ internal sealed class GpuPortalOverlay : IDisposable
     internal GpuPortalOverlay(PortalGeometry geometry)
     {
         this.geometry = geometry;
+        canvasWidth = checked(geometry.FrameWidth + (OverscanMargin * 2));
+        canvasHeight = checked(geometry.FrameHeight + (OverscanMargin * 2));
         _ = Application.OleRequired();
         if (!GraphicsCaptureSession.IsSupported())
         {
@@ -120,15 +134,15 @@ internal sealed class GpuPortalOverlay : IDisposable
         }
 
         resources = GpuDeviceResources.Create();
-        form = new PortalGpuForm(geometry.FrameWidth, geometry.FrameHeight);
+        form = new PortalGpuForm(canvasWidth, canvasHeight);
         _ = form.Handle;
 
         using var adapter = resources.DxgiDevice.GetAdapter();
         using var factory = adapter.GetParent<IDXGIFactory2>();
         var swapChainDescription = new SwapChainDescription1
         {
-            Width = checked((uint)geometry.FrameWidth),
-            Height = checked((uint)geometry.FrameHeight),
+            Width = checked((uint)canvasWidth),
+            Height = checked((uint)canvasHeight),
             Format = Format.B8G8R8A8_UNorm,
             Stereo = false,
             SampleDescription = new SampleDescription(1, 0),
@@ -200,6 +214,10 @@ internal sealed class GpuPortalOverlay : IDisposable
 
     internal NativeMethods.Point? LastPresentedCenter => lastPresentedCenter;
 
+    internal int CanvasRelocationCount => Volatile.Read(ref canvasRelocationCount);
+
+    internal bool HasInputPassThrough => form.HasInputPassThrough;
+
     internal bool TryShow(
         nint sourceWindow,
         nint protectedWindow,
@@ -237,10 +255,12 @@ internal sealed class GpuPortalOverlay : IDisposable
             framePool.FrameArrived += OnFrameArrived;
             SourceWindow = sourceWindow;
             active = true;
+            canvasBounds = null;
             lastPresentedCenter = null;
             latestCaptureSerial = 0;
             presentedCaptureSerial = 0;
             presentedFrames = 0;
+            canvasRelocationCount = 0;
             captureFailure = null;
             session.StartCapture();
             error = null;
@@ -302,22 +322,44 @@ internal sealed class GpuPortalOverlay : IDisposable
             }
 
             var frameBounds = geometry.CreateFrameBounds(screenCenter);
+            NativeMethods.Rect activeCanvasBounds;
+            bool relocateCanvas;
+            if (canvasBounds is { } existingCanvasBounds &&
+                Contains(existingCanvasBounds, frameBounds))
+            {
+                activeCanvasBounds = existingCanvasBounds;
+                relocateCanvas = false;
+            }
+            else
+            {
+                activeCanvasBounds = CreateCenteredCanvasBounds(
+                    screenCenter,
+                    canvasWidth,
+                    canvasHeight);
+                relocateCanvas = true;
+            }
+
             var parameters = new PortalShaderParameters(
                 new Vector4(
-                    frameBounds.Left - sourceBounds.Left,
-                    frameBounds.Top - sourceBounds.Top,
+                    activeCanvasBounds.Left - sourceBounds.Left,
+                    activeCanvasBounds.Top - sourceBounds.Top,
                     texture.Description.Width,
                     texture.Description.Height),
                 new Vector4(
-                    geometry.FrameWidth,
-                    geometry.FrameHeight,
+                    canvasWidth,
+                    canvasHeight,
                     geometry.Shape == PortalShape.Circle ? 0f : 1f,
                     geometry.EffectiveFeatherWidth),
                 new Vector4(
                     geometry.EffectiveCornerRadius,
                     geometry.Radius,
                     0f,
-                    0f));
+                    0f),
+                new Vector4(
+                    geometry.FrameWidth,
+                    geometry.FrameHeight,
+                    screenCenter.X - activeCanvasBounds.Left,
+                    screenCenter.Y - activeCanvasBounds.Top));
             resources.Context.UpdateSubresource(
                 in parameters,
                 parameterBuffer,
@@ -329,8 +371,8 @@ internal sealed class GpuPortalOverlay : IDisposable
             resources.Context.RSSetViewport(
                 0,
                 0,
-                geometry.FrameWidth,
-                geometry.FrameHeight,
+                canvasWidth,
+                canvasHeight,
                 0,
                 1);
             resources.Context.IASetPrimitiveTopology(PrimitiveTopology.TriangleList);
@@ -345,19 +387,26 @@ internal sealed class GpuPortalOverlay : IDisposable
             swapChain.Present(0, PresentFlags.None).CheckError();
             Interlocked.Increment(ref presentedFrames);
 
-            if (!NativeMethods.SetWindowPos(
+            if ((relocateCanvas || !windowShown) &&
+                !NativeMethods.SetWindowPos(
                     form.Handle,
                     NativeMethods.HwndTopMost,
-                    frameBounds.Left,
-                    frameBounds.Top,
-                    geometry.FrameWidth,
-                    geometry.FrameHeight,
+                    activeCanvasBounds.Left,
+                    activeCanvasBounds.Top,
+                    canvasWidth,
+                    canvasHeight,
                     NativeMethods.SwpNoActivate |
                     NativeMethods.SwpNoOwnerZOrder |
                     NativeMethods.SwpShowWindow))
             {
                 error = "无法移动 GPU 透视窗口。";
                 return false;
+            }
+
+            canvasBounds = activeCanvasBounds;
+            if (relocateCanvas)
+            {
+                Interlocked.Increment(ref canvasRelocationCount);
             }
 
             windowShown = true;
@@ -413,10 +462,12 @@ internal sealed class GpuPortalOverlay : IDisposable
             latestTextureView = null;
             latestTexture?.Dispose();
             latestTexture = null;
+            canvasBounds = null;
             lastPresentedCenter = null;
             latestCaptureSerial = 0;
             presentedCaptureSerial = 0;
             presentedFrames = 0;
+            canvasRelocationCount = 0;
             captureFailure = null;
         }
     }
@@ -539,14 +590,37 @@ internal sealed class GpuPortalOverlay : IDisposable
                bounds.Height > 1;
     }
 
+    internal static NativeMethods.Rect CreateCenteredCanvasBounds(
+        NativeMethods.Point center,
+        int width,
+        int height)
+    {
+        var left = center.X - (width / 2);
+        var top = center.Y - (height / 2);
+        return new NativeMethods.Rect(left, top, left + width, top + height);
+    }
+
+    internal static bool Contains(
+        NativeMethods.Rect outer,
+        NativeMethods.Rect inner) =>
+        inner.Left >= outer.Left &&
+        inner.Top >= outer.Top &&
+        inner.Right <= outer.Right &&
+        inner.Bottom <= outer.Bottom;
+
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct PortalShaderParameters(
         Vector4 SourceData,
         Vector4 OutputData,
-        Vector4 ShapeData);
+        Vector4 ShapeData,
+        Vector4 PortalData);
 
     private sealed class PortalGpuForm : Form
     {
+        private const int WmNcHitTest = 0x0084;
+        private const int WmMouseActivate = 0x0021;
+        private const int HtTransparent = -1;
+        private const int MaNoActivate = 3;
         private const int WsExTransparent = 0x00000020;
         private const int WsExToolWindow = 0x00000080;
         private const int WsExNoActivate = 0x08000000;
@@ -565,6 +639,18 @@ internal sealed class GpuPortalOverlay : IDisposable
 
         protected override bool ShowWithoutActivation => true;
 
+        internal bool HasInputPassThrough =>
+            NativeMethods.SendMessage(
+                Handle,
+                WmNcHitTest,
+                nint.Zero,
+                nint.Zero) == new nint(HtTransparent) &&
+            NativeMethods.SendMessage(
+                Handle,
+                WmMouseActivate,
+                nint.Zero,
+                nint.Zero) == new nint(MaNoActivate);
+
         protected override CreateParams CreateParams
         {
             get
@@ -577,6 +663,23 @@ internal sealed class GpuPortalOverlay : IDisposable
                     WsExNoRedirectionBitmap;
                 return parameters;
             }
+        }
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == WmNcHitTest)
+            {
+                message.Result = new nint(HtTransparent);
+                return;
+            }
+
+            if (message.Msg == WmMouseActivate)
+            {
+                message.Result = new nint(MaNoActivate);
+                return;
+            }
+
+            base.WndProc(ref message);
         }
     }
 }
