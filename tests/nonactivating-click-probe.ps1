@@ -227,6 +227,8 @@ try {
     [WindowPortalProbeNative]::SetCursorPos($centerX, $centerY) | Out-Null
     [WindowPortalProbeNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
     [WindowPortalProbeNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 50
+    [WindowPortalProbeNative]::mouse_event(0x0800, 0, 0, 120, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 200
 
     $foregroundAfter = [WindowPortalProbeNative]::GetForegroundWindow()
@@ -237,6 +239,12 @@ try {
         $targetTitleBuffer,
         $targetTitleBuffer.Capacity) | Out-Null
     $targetTitle = $targetTitleBuffer.ToString()
+    $hostTitleBuffer = [System.Text.StringBuilder]::new(512)
+    [WindowPortalProbeNative]::GetWindowText(
+        $chatGpt,
+        $hostTitleBuffer,
+        $hostTitleBuffer.Capacity) | Out-Null
+    $hostTitle = $hostTitleBuffer.ToString()
 
     $portalProcess.WaitForExit()
     $portalExitCode = $portalProcess.ExitCode
@@ -250,6 +258,8 @@ try {
     }
     $extendedStyleAfter = [WindowPortalProbeNative]::GetWindowLongPtr($targetProcess.MainWindowHandle, -20)
     $clickForwarded = $targetTitle -like '*Clicks: 1*'
+    $wheelForwarded = $targetTitle -like '*Wheel: 120*'
+    $hostWheelSuppressed = $hostTitle -like '*Wheel: 0*'
     $foregroundPreserved = $foregroundAfter -eq $foregroundBefore
     $zOrderPreserved = $windowAboveBefore -eq $windowAboveAfter
     $noActivateApplied = ($extendedStyleDuring.ToInt64() -band 0x08000000) -ne 0
@@ -260,9 +270,12 @@ try {
     Write-Output "CHATGPT_HWND=0x$($chatGpt.ToInt64().ToString('X'))"
     Write-Output "TARGET_HWND=0x$($targetProcess.MainWindowHandle.ToInt64().ToString('X'))"
     Write-Output "TARGET_TITLE=$targetTitle"
+    Write-Output "HOST_TITLE=$hostTitle"
     Write-Output "FOREGROUND_BEFORE=0x$($foregroundBefore.ToInt64().ToString('X'))"
     Write-Output "FOREGROUND_AFTER=0x$($foregroundAfter.ToInt64().ToString('X'))"
     Write-Output "CLICK_FORWARDED=$clickForwarded"
+    Write-Output "WHEEL_FORWARDED=$wheelForwarded"
+    Write-Output "HOST_WHEEL_SUPPRESSED=$hostWheelSuppressed"
     Write-Output "FOREGROUND_PRESERVED=$foregroundPreserved"
     Write-Output "WINDOW_ABOVE_BEFORE=0x$($windowAboveBefore.ToInt64().ToString('X'))"
     Write-Output "WINDOW_ABOVE_AFTER=0x$($windowAboveAfter.ToInt64().ToString('X'))"
@@ -274,6 +287,8 @@ try {
 
     if ($portalExitCode -ne 0 -or
         -not $clickForwarded -or
+        -not $wheelForwarded -or
+        -not $hostWheelSuppressed -or
         -not $foregroundPreserved -or
         -not $zOrderPreserved -or
         -not $noActivateApplied -or

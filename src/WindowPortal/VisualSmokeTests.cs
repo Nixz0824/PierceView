@@ -588,11 +588,11 @@ internal static class VisualSmokeTests
 				failures.Add($"真实鼠标移动时 DWM 来源重定位过多：{sourceUpdates} 次。");
 			}
 
-			if (displayRelocations > sourceUpdates + 1)
+			if (displayRelocations != 1)
 			{
 				failures.Add(
-					$"显示画布出现逐像素移动：DWM 来源 {sourceUpdates} 次，" +
-					$"显示画布 {displayRelocations} 次。");
+					$"固定虚拟屏幕显示窗发生了额外移动：" +
+					$"DWM 来源 {sourceUpdates} 次，显示窗 {displayRelocations} 次。");
 			}
 
 			if (presentationsDuringMotion != successfulUpdates)

@@ -105,10 +105,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 			}
 
 			_capture = new CaptureSurface(_geometry);
-			_display = new LayeredPortalForm(
-				_geometry,
-				_capture.CanvasWidth,
-				_capture.CanvasHeight);
+			_display = new LayeredPortalForm(_geometry);
 			if (!_capture.TryRegisterSource(sourceWindow, out error))
 			{
 				HidePortal();
@@ -743,7 +740,11 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		private readonly byte[] _alphaMask;
 
-		private readonly byte[] _pixelBuffer;
+		private readonly byte[] _portalPixelBuffer;
+
+		private readonly byte[] _zeroRow;
+
+		private readonly Rectangle _virtualBounds;
 
 		private readonly int _width;
 
@@ -765,6 +766,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		private int? _lastTop;
 
+		private Rectangle? _lastPortalBounds;
+
 		internal int RelocationCount { get; private set; }
 
 		internal int PresentationCount { get; private set; }
@@ -782,24 +785,23 @@ internal sealed class DwmPortalOverlay : IDisposable
 			}
 		}
 
-		internal LayeredPortalForm(
-			PortalGeometry geometry,
-			int canvasWidth,
-			int canvasHeight)
+		internal LayeredPortalForm(PortalGeometry geometry)
 		{
 			_portalWidth = geometry.FrameWidth;
 			_portalHeight = geometry.FrameHeight;
 			_alphaMask = PortalFrameComposer.CreateAlphaMask(geometry);
-			_width = canvasWidth;
-			_height = canvasHeight;
-			_pixelBuffer = new byte[checked(_width * _height * 4)];
+			_portalPixelBuffer = new byte[checked(_portalWidth * _portalHeight * 4)];
+			_virtualBounds = SystemInformation.VirtualScreen;
+			_width = Math.Max(1, _virtualBounds.Width);
+			_height = Math.Max(1, _virtualBounds.Height);
+			_zeroRow = new byte[checked(_width * 4)];
 			FormBorderStyle = FormBorderStyle.None;
 			ShowInTaskbar = false;
 			StartPosition = FormStartPosition.Manual;
 			AutoScaleMode = AutoScaleMode.None;
 			BackColor = Color.Black;
 			TopMost = true;
-			Bounds = new Rectangle(-32000, -32000, _width, _height);
+			Bounds = _virtualBounds;
 			_ = Handle;
 		}
 
@@ -811,9 +813,12 @@ internal sealed class DwmPortalOverlay : IDisposable
 			int top,
 			out string? error)
 		{
-			if (frame.Width != _width || frame.Height != _height)
+			if (portalLeft < 0 ||
+			    portalTop < 0 ||
+			    portalLeft + _portalWidth > frame.Width ||
+			    portalTop + _portalHeight > frame.Height)
 			{
-				error = "捕获帧尺寸与透视区域不一致。";
+				error = "透视区域超出捕获帧。";
 				return false;
 			}
 
@@ -822,16 +827,26 @@ internal sealed class DwmPortalOverlay : IDisposable
 				return false;
 			}
 
-			PortalFrameComposer.CopyPositionedPremultipliedPixels(
+			PortalFrameComposer.CopyPortalPremultipliedPixels(
 				frame,
-				_dibBits,
+				portalLeft,
+				portalTop,
 				_alphaMask,
 				_portalWidth,
 				_portalHeight,
-				portalLeft,
-				portalTop,
-				_pixelBuffer);
-			var dst = new NativeMethods.Point(left, top);
+				_portalPixelBuffer);
+			if (_lastPortalBounds is { } oldPortalBounds)
+			{
+				ClearDibRectangle(oldPortalBounds);
+			}
+
+			var portalBounds = new Rectangle(
+				left + portalLeft,
+				top + portalTop,
+				_portalWidth,
+				_portalHeight);
+			WritePortalToDib(portalBounds);
+			var dst = new NativeMethods.Point(_virtualBounds.Left, _virtualBounds.Top);
 			var size = new NativeMethods.Size(_width, _height);
 			var src = new NativeMethods.Point(0, 0);
 			var blend = new NativeMethods.BlendFunction
@@ -858,12 +873,13 @@ internal sealed class DwmPortalOverlay : IDisposable
 			}
 
 			PresentationCount++;
+			_lastPortalBounds = portalBounds;
 
-			if (_lastLeft != left || _lastTop != top)
+			if (_lastLeft != _virtualBounds.Left || _lastTop != _virtualBounds.Top)
 			{
 				RelocationCount++;
-				_lastLeft = left;
-				_lastTop = top;
+				_lastLeft = _virtualBounds.Left;
+				_lastTop = _virtualBounds.Top;
 			}
 
 			if (!_shown)
@@ -946,8 +962,55 @@ internal sealed class DwmPortalOverlay : IDisposable
 				return false;
 			}
 
+			for (var y = 0; y < _height; y++)
+			{
+				Marshal.Copy(_zeroRow, 0, _dibBits + (y * _width * 4), _zeroRow.Length);
+			}
+
 			error = null;
 			return true;
+		}
+
+		private void ClearDibRectangle(Rectangle screenBounds)
+		{
+			var clipped = Rectangle.Intersect(screenBounds, _virtualBounds);
+			if (clipped.Width <= 0 || clipped.Height <= 0)
+			{
+				return;
+			}
+
+			var localLeft = clipped.Left - _virtualBounds.Left;
+			var localTop = clipped.Top - _virtualBounds.Top;
+			var byteCount = clipped.Width * 4;
+			for (var y = 0; y < clipped.Height; y++)
+			{
+				var destination = _dibBits +
+				                  (((localTop + y) * _width + localLeft) * 4);
+				Marshal.Copy(_zeroRow, 0, destination, byteCount);
+			}
+		}
+
+		private void WritePortalToDib(Rectangle screenBounds)
+		{
+			var clipped = Rectangle.Intersect(screenBounds, _virtualBounds);
+			if (clipped.Width <= 0 || clipped.Height <= 0)
+			{
+				return;
+			}
+
+			var sourceLeft = clipped.Left - screenBounds.Left;
+			var sourceTop = clipped.Top - screenBounds.Top;
+			var localLeft = clipped.Left - _virtualBounds.Left;
+			var localTop = clipped.Top - _virtualBounds.Top;
+			var byteCount = clipped.Width * 4;
+			for (var y = 0; y < clipped.Height; y++)
+			{
+				var sourceOffset =
+					((sourceTop + y) * _portalWidth + sourceLeft) * 4;
+				var destination = _dibBits +
+				                  (((localTop + y) * _width + localLeft) * 4);
+				Marshal.Copy(_portalPixelBuffer, sourceOffset, destination, byteCount);
+			}
 		}
 
 		internal void HidePortal()
@@ -972,6 +1035,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 			_shown = false;
 			_lastLeft = null;
 			_lastTop = null;
+			_lastPortalBounds = null;
 		}
 
 		protected override void Dispose(bool disposing)
@@ -1154,24 +1218,29 @@ internal sealed class DwmPortalOverlay : IDisposable
 			}
 		}
 
-		internal static void CopyPositionedPremultipliedPixels(
+		internal static void CopyPortalPremultipliedPixels(
 			Bitmap frame,
-			nint destination,
+			int sourceLeft,
+			int sourceTop,
 			byte[] alphaMask,
 			int portalWidth,
 			int portalHeight,
-			int portalLeft,
-			int portalTop,
 			byte[] reusableBuffer)
 		{
-			if (destination == nint.Zero)
-			{
-				throw new ArgumentException("Destination DIB is not initialized.", nameof(destination));
-			}
-
 			if (alphaMask.Length != checked(portalWidth * portalHeight))
 			{
 				throw new ArgumentException("Alpha mask dimensions do not match the portal.", nameof(alphaMask));
+			}
+			if (sourceLeft < 0 ||
+			    sourceTop < 0 ||
+			    sourceLeft + portalWidth > frame.Width ||
+			    sourceTop + portalHeight > frame.Height)
+			{
+				throw new ArgumentOutOfRangeException(nameof(sourceLeft), "Portal crop is outside the frame.");
+			}
+			if (reusableBuffer.Length < checked(portalWidth * portalHeight * 4))
+			{
+				throw new ArgumentException("Reusable buffer is smaller than the portal.", nameof(reusableBuffer));
 			}
 
 			var data = frame.LockBits(
@@ -1180,39 +1249,44 @@ internal sealed class DwmPortalOverlay : IDisposable
 				PixelFormat.Format32bppArgb);
 			try
 			{
-				var stride = Math.Abs(data.Stride);
-				var requiredLength = checked(stride * frame.Height);
-				if (reusableBuffer.Length < requiredLength)
+				var sourceStride = Math.Abs(data.Stride);
+				var portalStride = checked(portalWidth * 4);
+				for (var y = 0; y < portalHeight; y++)
 				{
-					throw new ArgumentException("Reusable buffer is smaller than the frame.", nameof(reusableBuffer));
-				}
-
-				CopyBitmapToBuffer(frame, data, reusableBuffer, stride);
-				ApplyPositionedMask(
-					reusableBuffer,
-					stride,
-					frame.Width,
-					frame.Height,
-					alphaMask,
-					portalWidth,
-					portalHeight,
-					portalLeft,
-					portalTop);
-
-				var destinationStride = checked(frame.Width * 4);
-				if (stride == destinationStride)
-				{
-					Marshal.Copy(reusableBuffer, 0, destination, checked(destinationStride * frame.Height));
-					return;
-				}
-
-				for (var y = 0; y < frame.Height; y++)
-				{
+					var sourceY = sourceTop + y;
+					var sourceRow = data.Stride >= 0
+						? data.Scan0 + (sourceY * data.Stride) + (sourceLeft * 4)
+						: data.Scan0 + ((frame.Height - 1 - sourceY) * sourceStride) + (sourceLeft * 4);
 					Marshal.Copy(
+						sourceRow,
 						reusableBuffer,
-						y * stride,
-						destination + (y * destinationStride),
-						destinationStride);
+						y * portalStride,
+						portalStride);
+				}
+
+				for (var index = 0; index < alphaMask.Length; index++)
+				{
+					var pixel = index * 4;
+					var alpha = alphaMask[index];
+					if (alpha == 0)
+					{
+						reusableBuffer[pixel] = 0;
+						reusableBuffer[pixel + 1] = 0;
+						reusableBuffer[pixel + 2] = 0;
+						reusableBuffer[pixel + 3] = 0;
+						continue;
+					}
+
+					if (alpha != byte.MaxValue)
+					{
+						reusableBuffer[pixel] =
+							(byte)((reusableBuffer[pixel] * alpha + 127) / 255);
+						reusableBuffer[pixel + 1] =
+							(byte)((reusableBuffer[pixel + 1] * alpha + 127) / 255);
+						reusableBuffer[pixel + 2] =
+							(byte)((reusableBuffer[pixel + 2] * alpha + 127) / 255);
+					}
+					reusableBuffer[pixel + 3] = alpha;
 				}
 			}
 			finally

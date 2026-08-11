@@ -118,7 +118,11 @@ internal sealed class WindowRegionController : IDisposable
 			return false;
 		}
 		Dictionary<nint, NativeMethods.Rect> dictionary = new Dictionary<nint, NativeMethods.Rect>();
-		bool flag = _lastCursor != screenPoint;
+		bool flag = _lastCursor is null ||
+		            ShouldReanchorAperture(
+			            _lastCursor.Value,
+			            screenPoint,
+			            _geometry.InteractionReanchorDistance);
 		foreach (RegionWindowState window in _windows)
 		{
 			if (!NativeMethods.IsWindow(window.Window) || !NativeMethods.GetWindowRect(window.Window, out var rect) || rect.Width <= 1 || rect.Height <= 1)
@@ -278,6 +282,16 @@ internal sealed class WindowRegionController : IDisposable
 	private bool ApplyHole(nint window, NativeMethods.Rect windowRect, NativeMethods.Point screenPoint, out string? error)
 	{
 		return ApplyHoleCore(window, windowRect, screenPoint, _geometry, out error);
+	}
+
+	internal static bool ShouldReanchorAperture(
+		NativeMethods.Point anchor,
+		NativeMethods.Point pointer,
+		int distance)
+	{
+		var dx = (long)pointer.X - anchor.X;
+		var dy = (long)pointer.Y - anchor.Y;
+		return (dx * dx) + (dy * dy) >= (long)distance * distance;
 	}
 
 	// Visual smoke uses the same region-update path as production so a test-only

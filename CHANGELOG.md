@@ -10,6 +10,22 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 - （暂无）
 
+## [2.1.0-cpu-alpha.4] - 2026-08-11
+
+### Fixed
+
+- CPU 用户可见分层窗改为在一次 F8 会话内固定覆盖 Windows 虚拟屏幕；96 像素安全边界跨界时只重设屏外 DWM 捕获映射，不再移动顶层显示 HWND，从实现路径上移除旧位置窗口残影来源。
+- Keep the user-visible CPU layered surface fixed across the Windows virtual screen for the full F8 session. Crossing the 96 px capture margin now remaps only the off-screen DWM source and never moves the top-level display HWND, removing the native stale-window trail source from the presentation path.
+- 物理交互孔恢复为 32 像素并采用 16 像素锚定阈值；滚轮期间的微小鼠标位移保持在同一个原生命中孔内，避免前后台页面交替收到滚轮，同时减少宿主 Region 改写次数。
+- Restore a 32 px physical input aperture with a 16 px anchoring threshold. Small wheel-time pointer motion remains inside one native hit-test hole, avoiding alternating foreground/background wheel routing while reducing host Region rewrites.
+
+### Tests
+
+- 新增独立进程滚轮独占回归：后台窗口 `Wheel=120`、前台窗口 `Wheel=0`，并与真实点击、前台保持、Z-order、`WS_EX_NOACTIVATE` 及样式恢复一起验证。
+- Add an independent-process wheel exclusivity regression: background `Wheel=120`, foreground `Wheel=0`, alongside native click delivery, foreground preservation, Z-order, `WS_EX_NOACTIVATE`, and style restoration.
+- 视觉冒烟验证 DWM 来源可重定位 9 次而顶层显示窗只定位 1 次；真实鼠标/Hover 坐标异常 `0/384`，四种形状无黑帧或形状异常，最慢更新约 `10.03ms`。
+- Visual smoke verifies nine DWM source remaps with only one top-level display placement; real-pointer/hover alignment reports `0/384` mismatches, all four shapes have no black or invalid frames, and the slowest update is approximately `10.03ms`.
+
 ## [2.1.0-cpu-alpha.3] - 2026-08-11
 
 ### Fixed

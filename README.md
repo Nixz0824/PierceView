@@ -10,7 +10,7 @@
 
 PierceView is a lightweight Windows tray utility. Hold `F8` to open a selectable rounded feathered rectangle, rounded hard rectangle, or circle around the pointer, then view, scroll, or click the single window directly behind your current work. Release the key to restore the foreground window immediately.
 
-**公开版本 / Public release:** `1.0.6`　|　**本地 CPU 开发版本 / Local CPU development:** `2.1.0-cpu-alpha.3`
+**公开版本 / Public release:** `1.0.6`　|　**本地 CPU 开发版本 / Local CPU development:** `2.1.0-cpu-alpha.4`
 
 ## 为什么是寸镜 / Why PierceView
 
@@ -36,9 +36,9 @@ Many `Alt+Tab` trips are not real context switches—you only need a number, a s
 
 The 2.1 alpha adds adjustable feathering to both circles and automatically rounded rectangles; set feathering to 0 for a hard edge. The circle radius still defines the fully clear area, while feathering expands outward, so the default clear view does not shrink. Every shape keeps the stable single-layer core: each F8 session uses one fixed visual source directly behind the foreground and does not composite or switch to deeper layers. Dynamic background content keeps refreshing even when the pointer stays still.
 
-CPU 版本使用比透视形状四周各大 96 像素的稳定画布。鼠标在安全范围内移动时，原生显示窗口保持不动，只把上一张原始抓帧中的形状移到新位置；后台内容以约 120Hz 为目标抓取，并在提交前读取最新鼠标坐标重新对齐。每轮只向分层窗提交一次最终画面，再把实际提交坐标同步给鼠标中心的 4 像素物理交互孔；只有跨出安全范围才同步更新 DWM 来源和显示画布，以减少旧路径闪现与透视窗内部的陈旧帧。
+CPU 版本把屏外 DWM 捕获面保留为透视形状四周各大 96 像素的小画布，但用户可见的分层显示窗在一次 F8 会话内固定覆盖 Windows 虚拟屏幕，只更新其中的透明像素，不再随捕获边界移动原生 HWND。后台内容以约 120Hz 为目标抓取，每轮只提交一张最终画面。鼠标中心使用 32 像素锚定交互孔：指针在孔内的小幅移动不会改写宿主 Region，越过 16 像素阈值才重新居中，从而同时降低旧路径闪现和滚轮在前后台之间交替命中的概率。
 
-The CPU build uses a stable canvas with a 96 px margin around the portal. While the pointer stays inside that margin, the native display window does not move; the shape is repositioned over the latest raw captured frame. Background capture targets roughly 120Hz and late-latches to the newest pointer coordinates before presentation. Each runtime tick submits only one final layered frame, then synchronizes its actual committed position to a four-pixel physical input aperture at the pointer. DWM source and display-canvas relocation happen only after crossing the margin, reducing stale-path flashes and stale frames inside the portal.
+The CPU build keeps the off-screen DWM capture surface as a small canvas with a 96 px margin, while the user-visible layered surface stays fixed across the Windows virtual screen for the entire F8 session and updates only its transparent pixels—the native display HWND no longer follows capture-boundary moves. Background capture targets roughly 120Hz and each runtime tick presents one final frame. A 32 px anchored input aperture handles native interaction: small pointer motion inside the hole does not rewrite the host Region, and recentering occurs only after crossing a 16 px threshold, reducing both stale-path flashes and wheel routing that alternates between foreground and background.
 
 ## 下载 / Download
 

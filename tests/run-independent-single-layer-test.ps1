@@ -7,7 +7,8 @@ $ErrorActionPreference = 'Stop'
 $workspace = Split-Path -Parent $PSScriptRoot
 $appProject = Join-Path $workspace 'src\WindowPortal\WindowPortal.csproj'
 $targetProject = Join-Path $workspace 'tests\WindowPortal.TestTarget\WindowPortal.TestTarget.csproj'
-$appExecutable = if ([string]::IsNullOrWhiteSpace($AppExecutable)) {
+$shouldBuildApp = [string]::IsNullOrWhiteSpace($AppExecutable)
+$resolvedAppExecutable = if ($shouldBuildApp) {
     Join-Path $workspace 'src\WindowPortal\bin\Release\net8.0-windows\PierceView.exe'
 }
 else {
@@ -15,7 +16,7 @@ else {
 }
 $targetExecutable = Join-Path $workspace 'tests\WindowPortal.TestTarget\bin\Release\net8.0-windows\WindowPortal.TestTarget.exe'
 
-if ([string]::IsNullOrWhiteSpace($AppExecutable)) {
+if ($shouldBuildApp) {
     dotnet build $appProject -c Release
     if ($LASTEXITCODE -ne 0) {
         throw 'PierceView Release build failed.'
@@ -41,7 +42,7 @@ try {
 
     & (Join-Path $PSScriptRoot 'nonactivating-click-probe.ps1') `
         -ChatGptWindow $hostProcess.MainWindowHandle.ToInt64() `
-        -PortalExecutable $appExecutable
+        -PortalExecutable $resolvedAppExecutable
 
     Write-Output 'INDEPENDENT_SINGLE_LAYER_TEST=PASS'
 }

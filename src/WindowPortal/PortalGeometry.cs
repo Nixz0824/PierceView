@@ -13,10 +13,7 @@ internal readonly record struct PortalGeometry(
     int Height,
     int FeatherWidth)
 {
-    // The pointer itself is always at the portal center. A four-pixel aperture is
-    // enough for native hit-testing while keeping the independently composited
-    // physical hole too small to become a visible second portal during hand-off.
-    private const int MaximumInteractionRadius = 4;
+    private const int MaximumInteractionRadius = 32;
 
     internal int FrameWidth => Shape == PortalShape.Circle
         ? checked((Radius * 2) + 1)
@@ -57,6 +54,14 @@ internal readonly record struct PortalGeometry(
             return Math.Clamp(clearHalfExtent, 1, MaximumInteractionRadius);
         }
     }
+
+    /// <summary>
+    /// Keep the physical aperture anchored until the pointer has consumed half of
+    /// its radius. Small wheel-time pointer jitter therefore remains inside the same
+    /// native hit-test hole without moving the host Region every render tick.
+    /// </summary>
+    internal int InteractionReanchorDistance =>
+        Math.Max(2, EffectiveInteractionRadius / 2);
 
     internal int EffectiveCornerRadius
     {

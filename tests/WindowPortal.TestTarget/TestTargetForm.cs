@@ -3,11 +3,13 @@ using System.Runtime.InteropServices;
 
 namespace WindowPortal.TestTarget;
 
-internal sealed class TestTargetForm : Form
+internal sealed class TestTargetForm : Form, IMessageFilter
 {
     private readonly Button _backgroundClickButton;
     private readonly TestTargetOptions _options;
     private int _backgroundClickCount;
+
+    private int _wheelDelta;
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -55,7 +57,7 @@ internal sealed class TestTargetForm : Form
         {
             _backgroundClickCount++;
             _backgroundClickButton.Text = $"BACKGROUND CLICKS: {_backgroundClickCount}";
-            Text = $"{_options.Label} | Clicks: {_backgroundClickCount}";
+            UpdateWindowTitle();
             BringToFront();
             Activate();
             _ = SetForegroundWindow(Handle);
@@ -63,6 +65,21 @@ internal sealed class TestTargetForm : Form
         Controls.Add(_backgroundClickButton);
         PositionButton();
         Resize += (_, _) => PositionButton();
+        Application.AddMessageFilter(this);
+        UpdateWindowTitle();
+    }
+
+    public bool PreFilterMessage(ref Message message)
+    {
+        const int wmMouseWheel = 0x020A;
+        if (message.Msg != wmMouseWheel || Control.FromHandle(message.HWnd) is null)
+        {
+            return false;
+        }
+
+        _wheelDelta += unchecked((short)((long)message.WParam >> 16));
+        UpdateWindowTitle();
+        return false;
     }
 
     protected override void OnPaintBackground(PaintEventArgs eventArgs)
@@ -87,5 +104,20 @@ internal sealed class TestTargetForm : Form
             (ClientSize.Width - _backgroundClickButton.Width) / 2,
             (ClientSize.Height - _backgroundClickButton.Height) / 2);
         _backgroundClickButton.BringToFront();
+    }
+
+    private void UpdateWindowTitle()
+    {
+        Text = $"{_options.Label} | Clicks: {_backgroundClickCount} | Wheel: {_wheelDelta}";
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Application.RemoveMessageFilter(this);
+        }
+
+        base.Dispose(disposing);
     }
 }
