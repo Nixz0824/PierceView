@@ -216,6 +216,9 @@ internal static class Program
                     Console.WriteLine(
                         $"连续换帧：{frameTimes.Count} 帧，" +
                         $"平均={frameTimes.Average():F2}ms，最慢={frameTimes.Max():F2}ms。");
+                    Console.WriteLine(
+                        $"DWM 来源重定位次数={visualOverlay.CaptureSourceUpdateCount}。" +
+                        "安全边界内移动只执行 CPU 对齐裁剪。");
                 }
             }
 

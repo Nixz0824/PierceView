@@ -442,9 +442,11 @@ internal static class VisualSmokeTests
 				}
 			}
 
+			var sourceUpdates = overlay.CaptureSourceUpdateCount;
 			Console.WriteLine(
 				$"真实鼠标 Hover 对齐：异常帧={mismatchedFrames}/{frameCount}，" +
-				$"异常采样={mismatchedSamples}/{samples}，Hover 重绘={back.HoverRepaintCount}。");
+				$"异常采样={mismatchedSamples}/{samples}，Hover 重绘={back.HoverRepaintCount}，" +
+				$"DWM 来源重定位={sourceUpdates}。");
 			if (back.HoverRepaintCount < 4)
 			{
 				failures.Add("后台 Hover 重绘次数不足，测试场景无效。");
@@ -456,6 +458,11 @@ internal static class VisualSmokeTests
 				failures.Add(
 					$"真实鼠标经过文字/图像控件时出现过多坐标错位：" +
 					$"{mismatchedFrames}/{frameCount} 帧，{mismatchedSamples}/{samples} 个采样。");
+			}
+
+			if (sourceUpdates > 12)
+			{
+				failures.Add($"真实鼠标移动时 DWM 来源重定位过多：{sourceUpdates} 次。");
 			}
 		}
 		finally
@@ -534,14 +541,22 @@ internal static class VisualSmokeTests
 			Thread.Sleep(16);
 		}
 
+		var sourceUpdates = overlay.CaptureSourceUpdateCount;
 		overlay.Hide();
 		front.Close();
 		back.Close();
 		Application.DoEvents();
-		Console.WriteLine($"高对比内容坐标对齐：错位帧={mismatches}/{samples}。");
+		Console.WriteLine(
+			$"高对比内容坐标对齐：错位帧={mismatches}/{samples}，" +
+			$"DWM 来源重定位={sourceUpdates}。");
 		if (samples < frameCount / 2 || mismatches > Math.Max(2, samples / 16))
 		{
 			failures.Add($"高对比文字/图像区域错位帧过多：{mismatches}/{samples}。");
+		}
+
+		if (sourceUpdates > 3)
+		{
+			failures.Add($"安全边界内移动仍重复重设 DWM 来源：{sourceUpdates} 次。");
 		}
 	}
 

@@ -11,7 +11,7 @@ namespace WindowPortal;
 /// <summary>
 /// DWM 单层透视预览。圆形沿用 1.0.5 稳定路径，2.x 在同管线增加圆角硬边/羽化矩形。
 /// 不用条带（条带重影）、不用「全幅+Region/双缓冲换帧」（易变方、闪圆）。
-/// 流程：屏外捕获窗上挂单张 DWM 缩略图 → 抓成位图 → CPU 形状蒙版预乘 alpha
+/// 流程：屏外捕获窗上挂单张带安全边界的 DWM 缩略图 → CPU 对齐裁剪 → 形状蒙版预乘 alpha
 /// → UpdateLayeredWindow 一次提交整帧。形状与内容同帧，避免叠影与换帧闪烁。
 /// </summary>
 internal sealed class DwmPortalOverlay : IDisposable
@@ -50,6 +50,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 		internal int ForegroundRecoveryCount => _foregroundGuard.RecoveryCount;
 
 		internal int BackgroundPromotionCount => _foregroundGuard.PromotionCount;
+
+		internal int CaptureSourceUpdateCount => _capture?.SourceUpdateCount ?? 0;
 
 		internal PortalOverlayManager(PortalGeometry geometry, bool enableForegroundGuard)
 		{
@@ -220,23 +222,49 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		private const int Offscreen = -32000;
 
+		// 鼠标在该边界内移动时只改变 CPU 裁剪位置，不重设 DWM 来源。
+		// 这样可以避免 DWM 来源矩形与顶层显示窗分别落在相邻两帧。
+		private const int OverscanMargin = 64;
+
 		private readonly PortalGeometry _geometry;
 
-		private readonly int _width;
+		private readonly int _frameWidth;
 
-		private readonly int _height;
+		private readonly int _frameHeight;
+
+		private readonly int _captureWidth;
+
+		private readonly int _captureHeight;
 
 		private readonly CaptureHostForm _host;
 
+		private readonly Bitmap _captureBuffer;
+
 		private nint _thumbnail;
 
-		private NativeMethods.Rect? _lastSource;
+		private NativeMethods.Rect? _bufferSource;
+
+		private int _sourceWindowWidth;
+
+		private int _sourceWindowHeight;
+
+		private int _cropX;
+
+		private int _cropY;
+
+		internal int SourceUpdateCount { get; private set; }
 
 		internal CaptureSurface(PortalGeometry geometry)
 		{
 			_geometry = geometry;
-			_width = geometry.FrameWidth;
-			_height = geometry.FrameHeight;
+			_frameWidth = geometry.FrameWidth;
+			_frameHeight = geometry.FrameHeight;
+			_captureWidth = checked(_frameWidth + (OverscanMargin * 2));
+			_captureHeight = checked(_frameHeight + (OverscanMargin * 2));
+			_captureBuffer = new Bitmap(
+				_captureWidth,
+				_captureHeight,
+				PixelFormat.Format32bppArgb);
 			_host = new CaptureHostForm
 			{
 				FormBorderStyle = FormBorderStyle.None,
@@ -245,7 +273,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 				AutoScaleMode = AutoScaleMode.None,
 				BackColor = Color.Black,
 				TopMost = false,
-				Bounds = new Rectangle(Offscreen, Offscreen, _width, _height)
+				Bounds = new Rectangle(Offscreen, Offscreen, _captureWidth, _captureHeight)
 			};
 			// 强制创建句柄并显示在屏外，DWM 缩略图需要目标窗可合成
 			_ = _host.Handle;
@@ -254,8 +282,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 				nint.Zero,
 				Offscreen,
 				Offscreen,
-				_width,
-				_height,
+				_captureWidth,
+				_captureHeight,
 				NativeMethods.SwpNoActivate |
 				NativeMethods.SwpNoOwnerZOrder |
 				NativeMethods.SwpNoZOrder |
@@ -288,16 +316,46 @@ internal sealed class DwmPortalOverlay : IDisposable
 			}
 
 			var frame = _geometry.CreateFrameBounds(screenCenter);
-			var source = new NativeMethods.Rect(
+			var requestedSource = new NativeMethods.Rect(
 				frame.Left - sourceWindowRect.Left,
 				frame.Top - sourceWindowRect.Top,
 				frame.Right - sourceWindowRect.Left,
 				frame.Bottom - sourceWindowRect.Top);
-			if (_lastSource == source)
+			var sourceSizeChanged =
+				_sourceWindowWidth != sourceWindowRect.Width ||
+				_sourceWindowHeight != sourceWindowRect.Height;
+			if (!sourceSizeChanged &&
+			    _bufferSource is { } currentBuffer &&
+			    Contains(currentBuffer, requestedSource))
 			{
+				_cropX = requestedSource.Left - currentBuffer.Left;
+				_cropY = requestedSource.Top - currentBuffer.Top;
 				error = null;
 				return true;
 			}
+
+			var bufferSource = new NativeMethods.Rect(
+				requestedSource.Left - OverscanMargin,
+				requestedSource.Top - OverscanMargin,
+				requestedSource.Right + OverscanMargin,
+				requestedSource.Bottom + OverscanMargin);
+			var sourceBounds = new NativeMethods.Rect(
+				0,
+				0,
+				sourceWindowRect.Width,
+				sourceWindowRect.Height);
+			var clippedSource = Intersect(bufferSource, sourceBounds);
+			if (clippedSource.Width <= 0 || clippedSource.Height <= 0)
+			{
+				error = "透视区域已经移出视觉来源窗口。";
+				return false;
+			}
+
+			var destination = new NativeMethods.Rect(
+				clippedSource.Left - bufferSource.Left,
+				clippedSource.Top - bufferSource.Top,
+				clippedSource.Right - bufferSource.Left,
+				clippedSource.Bottom - bufferSource.Top);
 
 			var properties = new NativeMethods.DwmThumbnailProperties
 			{
@@ -306,8 +364,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 				        NativeMethods.DwmTnpOpacity |
 				        NativeMethods.DwmTnpVisible |
 				        NativeMethods.DwmTnpSourceClientAreaOnly,
-				Destination = new NativeMethods.Rect(0, 0, _width, _height),
-				Source = source,
+				Destination = destination,
+				Source = clippedSource,
 				Opacity = byte.MaxValue,
 				Visible = true,
 				SourceClientAreaOnly = false
@@ -320,19 +378,25 @@ internal sealed class DwmPortalOverlay : IDisposable
 				return false;
 			}
 
-			_lastSource = source;
+			_bufferSource = bufferSource;
+			_sourceWindowWidth = sourceWindowRect.Width;
+			_sourceWindowHeight = sourceWindowRect.Height;
+			_cropX = requestedSource.Left - bufferSource.Left;
+			_cropY = requestedSource.Top - bufferSource.Top;
+			SourceUpdateCount++;
 			error = null;
 			return true;
 		}
 
 		internal bool TryGrabFrame(out Bitmap frame, out string? error)
 		{
-			frame = new Bitmap(_width, _height, PixelFormat.Format32bppArgb);
+			frame = null!;
 			var ok = false;
 			try
 			{
-				using (var graphics = Graphics.FromImage(frame))
+				using (var graphics = Graphics.FromImage(_captureBuffer))
 				{
+					graphics.Clear(Color.Black);
 					var hdc = graphics.GetHdc();
 					try
 					{
@@ -352,8 +416,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 									hdc,
 									0,
 									0,
-									_width,
-									_height,
+									_captureWidth,
+									_captureHeight,
 									windowDc,
 									0,
 									0,
@@ -371,10 +435,21 @@ internal sealed class DwmPortalOverlay : IDisposable
 				if (!ok)
 				{
 					error = "无法从 DWM 捕获面抓取帧：" + new Win32Exception(Marshal.GetLastWin32Error()).Message;
-					frame.Dispose();
-					frame = null!;
 					return false;
 				}
+
+				if (_cropX < 0 ||
+				    _cropY < 0 ||
+				    _cropX + _frameWidth > _captureWidth ||
+				    _cropY + _frameHeight > _captureHeight)
+				{
+					error = "DWM 安全边界裁剪位置超出捕获面。";
+					return false;
+				}
+
+				frame = _captureBuffer.Clone(
+					new Rectangle(_cropX, _cropY, _frameWidth, _frameHeight),
+					PixelFormat.Format32bppArgb);
 
 				// 全黑帧通常表示捕获失败（缩略图未合成到可抓取表面）
 				if (IsAlmostBlack(frame))
@@ -390,10 +465,27 @@ internal sealed class DwmPortalOverlay : IDisposable
 			}
 			catch
 			{
-				frame.Dispose();
+				frame?.Dispose();
 				throw;
 			}
 		}
+
+		private static bool Contains(
+			NativeMethods.Rect container,
+			NativeMethods.Rect candidate) =>
+			candidate.Left >= container.Left &&
+			candidate.Top >= container.Top &&
+			candidate.Right <= container.Right &&
+			candidate.Bottom <= container.Bottom;
+
+		private static NativeMethods.Rect Intersect(
+			NativeMethods.Rect first,
+			NativeMethods.Rect second) =>
+			new(
+				Math.Max(first.Left, second.Left),
+				Math.Max(first.Top, second.Top),
+				Math.Min(first.Right, second.Right),
+				Math.Min(first.Bottom, second.Bottom));
 
 		private static bool IsAlmostBlack(Bitmap frame)
 		{
@@ -423,7 +515,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 				_ = NativeMethods.DwmUnregisterThumbnail(_thumbnail);
 				_thumbnail = nint.Zero;
 			}
-			_lastSource = null;
+			_bufferSource = null;
+			_captureBuffer.Dispose();
 
 			_host.Close();
 			_host.Dispose();
@@ -819,6 +912,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 	internal int ForegroundRecoveryCount => Invoke(static manager => manager.ForegroundRecoveryCount);
 
 	internal int BackgroundPromotionCount => Invoke(static manager => manager.BackgroundPromotionCount);
+
+	internal int CaptureSourceUpdateCount => Invoke(static manager => manager.CaptureSourceUpdateCount);
 
 	internal DwmPortalOverlay(int radius)
 		: this(PortalGeometry.Circle(radius), enableForegroundGuard: true)

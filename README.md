@@ -10,7 +10,7 @@
 
 PierceView is a lightweight Windows tray utility. Hold `F8` to open a selectable rounded feathered rectangle, rounded hard rectangle, or circle around the pointer, then view, scroll, or click the single window directly behind your current work. Release the key to restore the foreground window immediately.
 
-**公开版本 / Public release:** `1.0.6`　|　**本地开发版本 / Local development:** `2.1.0-alpha.3`
+**公开版本 / Public release:** `1.0.6`　|　**本地开发版本 / Local development:** `2.1.0-alpha.4`
 
 ## 为什么是寸镜 / Why PierceView
 
@@ -35,6 +35,10 @@ Many `Alt+Tab` trips are not real context switches—you only need a number, a s
 2.1 alpha 提供可调羽化的圆形、自动圆角矩形，以及把羽化设为 0 后的硬边外观。圆形设置值仍表示完整清晰区，羽化带只向外扩展，因此默认清晰范围不会缩小。所有形状仍使用同一个稳定的单层内核：一次 F8 会话只固定使用紧贴当前窗口后的一个视觉来源，不合成更深层窗口，也不动态切换来源。按住 F8 后即使鼠标不动，后台动态内容也会持续刷新。
 
 The 2.1 alpha adds adjustable feathering to both circles and automatically rounded rectangles; set feathering to 0 for a hard edge. The circle radius still defines the fully clear area, while feathering expands outward, so the default clear view does not shrink. Every shape keeps the stable single-layer core: each F8 session uses one fixed visual source directly behind the foreground and does not composite or switch to deeper layers. Dynamic background content keeps refreshing even when the pointer stays still.
+
+移动时，屏外单张 DWM 缩略图会额外保留 64 像素安全边界。鼠标在边界内移动只做 CPU 对齐裁剪，视觉内容和覆盖层位置在同一次 `UpdateLayeredWindow` 中提交，避免逐像素重设 DWM 来源造成的相邻帧重影。
+
+While moving, the single off-screen DWM thumbnail keeps a 64 px safety margin. Pointer motion inside that margin uses CPU-aligned cropping, and content plus overlay position are submitted together through `UpdateLayeredWindow`, avoiding adjacent-frame ghosting from per-pixel DWM source changes.
 
 ## 下载 / Download
 

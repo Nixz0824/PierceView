@@ -10,6 +10,20 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 - （暂无）
 
+## [2.1.0-alpha.4] - 2026-08-11
+
+### Fixed
+
+- 屏外单张 DWM 缩略图增加 64 像素安全边界；边界内移动只改变 CPU 裁剪坐标，不再逐像素调用 `DwmUpdateThumbnailProperties`，使内容坐标与 `UpdateLayeredWindow` 覆盖层位置保持同帧，降低移动时的重影与抖动。
+- Add a 64 px safety margin to the single off-screen DWM thumbnail. Motion inside the margin changes only the CPU crop instead of calling `DwmUpdateThumbnailProperties` per pixel, keeping content coordinates and the `UpdateLayeredWindow` overlay position in the same frame to reduce motion ghosting and jitter.
+- 捕获缓冲位图在 F8 会话内复用，仅复制最终圆形/矩形尺寸的区域进入 alpha 合成，避免每帧重复分配大尺寸捕获缓冲。
+- Reuse the capture buffer for the F8 session and copy only the final circle/rectangle area into alpha composition, avoiding a new oversized capture allocation on every frame.
+
+### Tests
+
+- 高对比 128 像素往返测试为 0/64 错位帧且只重定位 1 次 DWM 来源；真实鼠标、后台 Hover 重绘与 240 像素往返测试为 0/384 错位采样、9 次来源重定位。
+- The high-contrast 128 px sweep reports 0/64 misaligned frames with one DWM source reposition; the real-pointer, background-hover, 240 px sweep reports 0/384 misaligned samples with nine source repositions.
+
 ## [2.1.0-alpha.3] - 2026-08-11
 
 ### Added
