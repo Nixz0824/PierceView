@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
@@ -280,6 +281,7 @@ internal static class VisualSmokeTests
 
 		RunStationaryRefreshTest(hardRoundedGeometry, frontColor, backColor, failures);
 		RunPatternAlignmentTest(hardRoundedGeometry, frontColor, failures);
+		RunLateLatchAlignmentTest(hardRoundedGeometry, frontColor, failures);
 		RunRealCursorHoverAlignmentTest(hardRoundedGeometry, frontColor, failures);
 
 		RunShape(
@@ -314,6 +316,99 @@ internal static class VisualSmokeTests
 			(Bitmap shot, PortalGeometry geometry, out string detail) =>
 				LooksFeatheredRectangleContent(shot, geometry, backColor, frontColor, out detail),
 			failures);
+	}
+
+	private static void RunLateLatchAlignmentTest(
+		PortalGeometry geometry,
+		Color frontColor,
+		List<string> failures)
+	{
+		using var back = new PatternWindow(
+			"PierceView Smoke Back - Late Latch",
+			120,
+			120,
+			720,
+			520);
+		using var front = CreateColorWindow(
+			"PierceView Smoke Front - Late Latch",
+			frontColor,
+			160,
+			160,
+			640,
+			460);
+		NativeMethods.GetCursorPos(out var originalCursor);
+		back.Show();
+		front.Show();
+		front.BringToFront();
+		front.Activate();
+		Application.DoEvents();
+		Thread.Sleep(200);
+		var requestedCenter = new NativeMethods.Point(
+			front.Left + (front.Width / 2) - 32,
+			front.Top + (front.Height / 2));
+		var latestCenter = new NativeMethods.Point(requestedCenter.X + 56, requestedCenter.Y);
+		using var overlay = new DwmPortalOverlay(
+			geometry,
+			enableForegroundGuard: false,
+			lateLatchToCursor: true);
+		try
+		{
+			_ = NativeMethods.SetCursorPos(requestedCenter.X, requestedCenter.Y);
+			Application.DoEvents();
+			if (!overlay.TryShow(back.Handle, front.Handle, requestedCenter, out var showError))
+			{
+				failures.Add("延迟锁定测试无法显示透视：" + showError);
+				return;
+			}
+
+			_ = NativeMethods.SetCursorPos(latestCenter.X, latestCenter.Y);
+			if (!overlay.TryUpdate(requestedCenter, out var updateError))
+			{
+				failures.Add("延迟锁定测试无法更新透视：" + updateError);
+				return;
+			}
+
+			Application.DoEvents();
+			Thread.Sleep(20);
+			var bounds = geometry.CreateFrameBounds(latestCenter);
+			using var shot = CaptureScreenRect(
+				bounds.Left,
+				bounds.Top,
+				geometry.FrameWidth,
+				geometry.FrameHeight);
+			var sampleX = geometry.FrameWidth - geometry.EffectiveFeatherWidth - 6;
+			var mismatches = 0;
+			var sampleOffsetsY = new[] { -72, -36, 0, 36, 72 };
+			foreach (var offsetY in sampleOffsetsY)
+			{
+				var sourcePoint = new NativeMethods.Point(
+					bounds.Left + sampleX,
+					latestCenter.Y + offsetY);
+				var observed = PatternWindow.ClosestPaletteIndex(
+					shot.GetPixel(sampleX, (geometry.FrameHeight / 2) + offsetY));
+				var expected = back.ExpectedPaletteIndex(sourcePoint);
+				if (observed != expected)
+				{
+					mismatches++;
+				}
+			}
+
+			Console.WriteLine(
+				$"提交前鼠标延迟锁定：偏移=56px，边缘采样异常={mismatches}/{sampleOffsetsY.Length}。");
+			if (mismatches > 0)
+			{
+				failures.Add(
+					$"提交前未使用最新鼠标位置：边缘采样异常 {mismatches}/{sampleOffsetsY.Length}。");
+			}
+		}
+		finally
+		{
+			overlay.Hide();
+			_ = NativeMethods.SetCursorPos(originalCursor.X, originalCursor.Y);
+			front.Close();
+			back.Close();
+			Application.DoEvents();
+		}
 	}
 
 	private static void RunRealCursorHoverAlignmentTest(
@@ -676,14 +771,14 @@ internal static class VisualSmokeTests
 		var blackishFrames = 0;
 		var invalidShapeFrames = 0;
 		var samples = 0;
+		const int moveCount = 48;
+		var frameTimes = new List<double>(moveCount);
 		var horizontalAmplitude = Math.Min(
 			180,
 			Math.Max(0, ((front.Width - geometry.FrameWidth) / 2) - 8));
 		var verticalAmplitude = Math.Min(
 			70,
 			Math.Max(0, ((front.Height - geometry.FrameHeight) / 2) - 8));
-		const int moveCount = 48;
-
 		for (var i = 0; i < moveCount; i++)
 		{
 			var t = i / (double)Math.Max(1, moveCount - 1);
@@ -691,11 +786,13 @@ internal static class VisualSmokeTests
 				center.X + (int)(horizontalAmplitude * Math.Sin(t * Math.PI * 2)),
 				center.Y + (int)(verticalAmplitude * Math.Cos(t * Math.PI * 2)));
 
+			var frameStartedAt = Stopwatch.GetTimestamp();
 			if (!overlay.TryUpdate(point, out var updateError))
 			{
 				failures.Add($"移动第 {i} 帧失败：{updateError}");
 				break;
 			}
+			frameTimes.Add(Stopwatch.GetElapsedTime(frameStartedAt).TotalMilliseconds);
 
 			Application.DoEvents();
 			Thread.Sleep(16);
@@ -730,6 +827,18 @@ internal static class VisualSmokeTests
 
 		Console.WriteLine(
 			$"{name}：采样帧={samples}，形状异常={invalidShapeFrames}，疑似过黑={blackishFrames}。");
+		if (frameTimes.Count > 0)
+		{
+			var sortedTimes = frameTimes.Order().ToArray();
+			var percentile95 = sortedTimes[Math.Min(
+				sortedTimes.Length - 1,
+				(int)Math.Ceiling(sortedTimes.Length * 0.95) - 1)];
+			var overBudget = frameTimes.Count(milliseconds => milliseconds > (1000d / 60d));
+			Console.WriteLine(
+				$"{name}换帧：平均={frameTimes.Average():F2}ms，" +
+				$"P95={percentile95:F2}ms，最慢={frameTimes.Max():F2}ms，" +
+				$"超过16.67ms={overBudget}/{frameTimes.Count}。");
+		}
 
 		if (samples < moveCount / 2)
 		{

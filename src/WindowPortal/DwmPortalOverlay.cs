@@ -29,7 +29,11 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		private readonly bool _enableForegroundGuard;
 
+		private readonly bool _lateLatchToCursor;
+
 		private readonly byte[] _alphaMask;
+
+		private readonly byte[] _framePixels;
 
 		private CaptureSurface? _capture;
 
@@ -53,11 +57,16 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		internal int CaptureSourceUpdateCount => _capture?.SourceUpdateCount ?? 0;
 
-		internal PortalOverlayManager(PortalGeometry geometry, bool enableForegroundGuard)
+		internal PortalOverlayManager(
+			PortalGeometry geometry,
+			bool enableForegroundGuard,
+			bool lateLatchToCursor)
 		{
 			_geometry = geometry;
 			_enableForegroundGuard = enableForegroundGuard;
+			_lateLatchToCursor = lateLatchToCursor;
 			_alphaMask = PortalFrameComposer.CreateAlphaMask(geometry);
+			_framePixels = new byte[checked(geometry.FrameWidth * geometry.FrameHeight * 4)];
 			FormBorderStyle = FormBorderStyle.None;
 			ShowInTaskbar = false;
 			StartPosition = FormStartPosition.Manual;
@@ -190,19 +199,30 @@ internal sealed class DwmPortalOverlay : IDisposable
 				_firstFrameFlushed = true;
 			}
 
-			if (!_capture.TryGrabFrame(out var frame, out error))
+			if (!_capture.TryGrabFrame(
+				    sourceWindowRect,
+				    screenCenter,
+				    _lateLatchToCursor,
+				    out var frame,
+				    out var presentedCenter,
+				    out error))
 			{
 				return false;
 			}
 
 			using (frame)
 			{
-				PortalFrameComposer.ApplyPremultipliedAlpha(frame, _alphaMask);
-				var bounds = _geometry.CreateFrameBounds(screenCenter);
+				PortalFrameComposer.ApplyPremultipliedAlpha(frame, _alphaMask, _framePixels);
+				var bounds = _geometry.CreateFrameBounds(presentedCenter);
 				if (!_display.TryPresent(frame, bounds.Left, bounds.Top, out error))
 				{
 					return false;
 				}
+			}
+
+			if (_enableForegroundGuard && presentedCenter != screenCenter)
+			{
+				_foregroundGuard.UpdatePortalGeometry(presentedCenter, _geometry.GuardRadius);
 			}
 
 			error = null;
@@ -388,9 +408,16 @@ internal sealed class DwmPortalOverlay : IDisposable
 			return true;
 		}
 
-		internal bool TryGrabFrame(out Bitmap frame, out string? error)
+		internal bool TryGrabFrame(
+			NativeMethods.Rect sourceWindowRect,
+			NativeMethods.Point requestedCenter,
+			bool lateLatchToCursor,
+			out Bitmap frame,
+			out NativeMethods.Point presentedCenter,
+			out string? error)
 		{
 			frame = null!;
+			presentedCenter = requestedCenter;
 			var ok = false;
 			try
 			{
@@ -438,6 +465,15 @@ internal sealed class DwmPortalOverlay : IDisposable
 					return false;
 				}
 
+				// PrintWindow 是本帧最慢的一段。抓取完成后再读取一次鼠标，
+				// 只在已经捕获的安全边界内重新裁剪，避免把 10~20ms 前的旧坐标提交到屏幕。
+				if (lateLatchToCursor &&
+				    NativeMethods.GetCursorPos(out var latestCenter) &&
+				    TryAlignCapturedCrop(sourceWindowRect, latestCenter))
+				{
+					presentedCenter = latestCenter;
+				}
+
 				if (_cropX < 0 ||
 				    _cropY < 0 ||
 				    _cropX + _frameWidth > _captureWidth ||
@@ -468,6 +504,33 @@ internal sealed class DwmPortalOverlay : IDisposable
 				frame?.Dispose();
 				throw;
 			}
+		}
+
+		private bool TryAlignCapturedCrop(
+			NativeMethods.Rect sourceWindowRect,
+			NativeMethods.Point screenCenter)
+		{
+			if (_bufferSource is not { } currentBuffer ||
+			    _sourceWindowWidth != sourceWindowRect.Width ||
+			    _sourceWindowHeight != sourceWindowRect.Height)
+			{
+				return false;
+			}
+
+			var frame = _geometry.CreateFrameBounds(screenCenter);
+			var requestedSource = new NativeMethods.Rect(
+				frame.Left - sourceWindowRect.Left,
+				frame.Top - sourceWindowRect.Top,
+				frame.Right - sourceWindowRect.Left,
+				frame.Bottom - sourceWindowRect.Top);
+			if (!Contains(currentBuffer, requestedSource))
+			{
+				return false;
+			}
+
+			_cropX = requestedSource.Left - currentBuffer.Left;
+			_cropY = requestedSource.Top - currentBuffer.Top;
+			return true;
 		}
 
 		private static bool Contains(
@@ -532,6 +595,18 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		private readonly int _height;
 
+		private nint _screenDc;
+
+		private nint _memoryDc;
+
+		private nint _dibSection;
+
+		private nint _dibBits;
+
+		private nint _previousBitmap;
+
+		private bool _shown;
+
 		protected override bool ShowWithoutActivation => true;
 
 		protected override CreateParams CreateParams
@@ -567,141 +642,155 @@ internal sealed class DwmPortalOverlay : IDisposable
 				return false;
 			}
 
-			var screenDc = NativeMethods.GetDC(nint.Zero);
-			if (screenDc == nint.Zero)
+			if (!TryEnsureSurface(out error))
+			{
+				return false;
+			}
+
+			CopyPremultipliedPixels(frame, _dibBits);
+			var dst = new NativeMethods.Point(left, top);
+			var size = new NativeMethods.Size(_width, _height);
+			var src = new NativeMethods.Point(0, 0);
+			var blend = new NativeMethods.BlendFunction
+			{
+				BlendOp = NativeMethods.AcSrcOver,
+				BlendFlags = 0,
+				SourceConstantAlpha = 255,
+				AlphaFormat = NativeMethods.AcSrcAlpha
+			};
+
+			if (!NativeMethods.UpdateLayeredWindow(
+				    Handle,
+				    _screenDc,
+				    ref dst,
+				    ref size,
+				    _memoryDc,
+				    ref src,
+				    0,
+				    ref blend,
+				    NativeMethods.UlwAlpha))
+			{
+				error = "UpdateLayeredWindow 失败：" + new Win32Exception(Marshal.GetLastWin32Error()).Message;
+				return false;
+			}
+
+			if (!_shown)
+			{
+				// UpdateLayeredWindow 已经提交位置；首次显示时只做一次顶层/可见性事务。
+				_ = NativeMethods.SetWindowPos(
+					Handle,
+					NativeMethods.HwndTopMost,
+					0,
+					0,
+					0,
+					0,
+					NativeMethods.SwpNoMove |
+					NativeMethods.SwpNoSize |
+					NativeMethods.SwpNoActivate |
+					NativeMethods.SwpNoOwnerZOrder |
+					NativeMethods.SwpShowWindow);
+				_shown = true;
+			}
+
+			error = null;
+			return true;
+		}
+
+		private bool TryEnsureSurface(out string? error)
+		{
+			if (_dibSection != nint.Zero)
+			{
+				error = null;
+				return true;
+			}
+
+			_screenDc = NativeMethods.GetDC(nint.Zero);
+			if (_screenDc == nint.Zero)
 			{
 				error = "无法获取屏幕 DC。";
 				return false;
 			}
 
-			var memDc = NativeMethods.CreateCompatibleDC(screenDc);
-			if (memDc == nint.Zero)
+			_memoryDc = NativeMethods.CreateCompatibleDC(_screenDc);
+			if (_memoryDc == nint.Zero)
 			{
-				_ = NativeMethods.ReleaseDC(nint.Zero, screenDc);
+				ReleaseSurface();
 				error = "无法创建兼容 DC。";
 				return false;
 			}
 
-			// GetHbitmap 会丢掉 alpha；用 DIB section 保留预乘 ARGB
-			if (!TryCreatePremultipliedDib(frame, out var hBitmap, out var dibBits, out error))
-			{
-				_ = NativeMethods.DeleteDC(memDc);
-				_ = NativeMethods.ReleaseDC(nint.Zero, screenDc);
-				return false;
-			}
-
-			var old = NativeMethods.SelectObject(memDc, hBitmap);
-			try
-			{
-				var dst = new NativeMethods.Point(left, top);
-				var size = new NativeMethods.Size(_width, _height);
-				var src = new NativeMethods.Point(0, 0);
-				var blend = new NativeMethods.BlendFunction
-				{
-					BlendOp = NativeMethods.AcSrcOver,
-					BlendFlags = 0,
-					SourceConstantAlpha = 255,
-					AlphaFormat = NativeMethods.AcSrcAlpha
-				};
-
-				if (!NativeMethods.UpdateLayeredWindow(
-					    Handle,
-					    screenDc,
-					    ref dst,
-					    ref size,
-					    memDc,
-					    ref src,
-					    0,
-					    ref blend,
-					    NativeMethods.UlwAlpha))
-				{
-					error = "UpdateLayeredWindow 失败：" + new Win32Exception(Marshal.GetLastWin32Error()).Message;
-					return false;
-				}
-
-				// 确保盖在色块窗之上
-				_ = NativeMethods.SetWindowPos(
-					Handle,
-					NativeMethods.HwndTopMost,
-					left,
-					top,
-					0,
-					0,
-					NativeMethods.SwpNoSize |
-					NativeMethods.SwpNoActivate |
-					NativeMethods.SwpNoOwnerZOrder |
-					NativeMethods.SwpShowWindow);
-
-				error = null;
-				return true;
-			}
-			finally
-			{
-				_ = NativeMethods.SelectObject(memDc, old);
-				_ = NativeMethods.DeleteObject(hBitmap);
-				_ = NativeMethods.DeleteDC(memDc);
-				_ = NativeMethods.ReleaseDC(nint.Zero, screenDc);
-				_ = dibBits; // bits owned by hBitmap
-			}
-		}
-
-		private static bool TryCreatePremultipliedDib(
-			Bitmap frame,
-			out nint hBitmap,
-			out nint bits,
-			out string? error)
-		{
-			hBitmap = nint.Zero;
-			bits = nint.Zero;
 			var header = new NativeMethods.BitmapInfoHeader
 			{
 				BiSize = (uint)Marshal.SizeOf<NativeMethods.BitmapInfoHeader>(),
-				BiWidth = frame.Width,
+				BiWidth = _width,
 				// 负高度 = 顶向下 DIB，与 Bitmap 扫描行一致
-				BiHeight = -frame.Height,
+				BiHeight = -_height,
 				BiPlanes = 1,
 				BiBitCount = 32,
 				BiCompression = 0
 			};
 
-			var screenDc = NativeMethods.GetDC(nint.Zero);
-			hBitmap = NativeMethods.CreateDIBSection(
-				screenDc,
+			// GetHbitmap 会丢掉 alpha；会话内复用同一张 DIB section 保留预乘 ARGB。
+			_dibSection = NativeMethods.CreateDIBSection(
+				_screenDc,
 				ref header,
 				0,
-				out bits,
+				out _dibBits,
 				nint.Zero,
 				0);
-			_ = NativeMethods.ReleaseDC(nint.Zero, screenDc);
 
-			if (hBitmap == nint.Zero || bits == nint.Zero)
+			if (_dibSection == nint.Zero || _dibBits == nint.Zero)
 			{
+				ReleaseSurface();
 				error = "CreateDIBSection 失败：" + new Win32Exception(Marshal.GetLastWin32Error()).Message;
 				return false;
 			}
 
+			_previousBitmap = NativeMethods.SelectObject(_memoryDc, _dibSection);
+			if (_previousBitmap == nint.Zero || _previousBitmap == new nint(-1))
+			{
+				ReleaseSurface();
+				error = "无法把 DIB section 绑定到内存 DC。";
+				return false;
+			}
+
+			error = null;
+			return true;
+		}
+
+		private static void CopyPremultipliedPixels(Bitmap frame, nint destination)
+		{
 			var data = frame.LockBits(
 				new Rectangle(0, 0, frame.Width, frame.Height),
 				ImageLockMode.ReadOnly,
 				PixelFormat.Format32bppArgb);
 			try
 			{
-				var srcStride = Math.Abs(data.Stride);
 				var dstStride = frame.Width * 4;
-				var row = new byte[dstStride];
+				if (data.Stride == dstStride)
+				{
+					NativeMethods.CopyMemory(
+						destination,
+						data.Scan0,
+						checked((nuint)(dstStride * frame.Height)));
+					return;
+				}
+
 				for (var y = 0; y < frame.Height; y++)
 				{
-					Marshal.Copy(data.Scan0 + (y * srcStride), row, 0, dstStride);
-					Marshal.Copy(row, 0, bits + (y * dstStride), dstStride);
+					var sourceRow = data.Stride >= 0
+						? data.Scan0 + (y * data.Stride)
+						: data.Scan0 + ((frame.Height - 1 - y) * -data.Stride);
+					NativeMethods.CopyMemory(
+						destination + (y * dstStride),
+						sourceRow,
+						(nuint)dstStride);
 				}
 			}
 			finally
 			{
 				frame.UnlockBits(data);
 			}
-
-			error = null;
-			return true;
 		}
 
 		internal void HidePortal()
@@ -723,6 +812,43 @@ internal sealed class DwmPortalOverlay : IDisposable
 				NativeMethods.SwpNoSize |
 				NativeMethods.SwpNoZOrder |
 				NativeMethods.SwpNoOwnerZOrder);
+			_shown = false;
+		}
+
+		protected override void Dispose(bool disposing)
+		{
+			ReleaseSurface();
+			base.Dispose(disposing);
+		}
+
+		private void ReleaseSurface()
+		{
+			if (_memoryDc != nint.Zero &&
+			    _previousBitmap != nint.Zero &&
+			    _previousBitmap != new nint(-1))
+			{
+				_ = NativeMethods.SelectObject(_memoryDc, _previousBitmap);
+			}
+
+			_previousBitmap = nint.Zero;
+			if (_dibSection != nint.Zero)
+			{
+				_ = NativeMethods.DeleteObject(_dibSection);
+				_dibSection = nint.Zero;
+				_dibBits = nint.Zero;
+			}
+
+			if (_memoryDc != nint.Zero)
+			{
+				_ = NativeMethods.DeleteDC(_memoryDc);
+				_memoryDc = nint.Zero;
+			}
+
+			if (_screenDc != nint.Zero)
+			{
+				_ = NativeMethods.ReleaseDC(nint.Zero, _screenDc);
+				_screenDc = nint.Zero;
+			}
 		}
 
 		protected override void WndProc(ref Message message)
@@ -829,7 +955,10 @@ internal sealed class DwmPortalOverlay : IDisposable
 				byte.MaxValue);
 		}
 
-		internal static void ApplyPremultipliedAlpha(Bitmap frame, byte[] alphaMask)
+		internal static void ApplyPremultipliedAlpha(
+			Bitmap frame,
+			byte[] alphaMask,
+			byte[]? reusableBuffer = null)
 		{
 			if (alphaMask.Length != checked(frame.Width * frame.Height))
 			{
@@ -843,8 +972,11 @@ internal sealed class DwmPortalOverlay : IDisposable
 			try
 			{
 				var stride = Math.Abs(data.Stride);
-				var buffer = new byte[stride * frame.Height];
-				Marshal.Copy(data.Scan0, buffer, 0, buffer.Length);
+				var requiredLength = checked(stride * frame.Height);
+				var buffer = reusableBuffer is { Length: var length } && length >= requiredLength
+					? reusableBuffer
+					: new byte[requiredLength];
+				Marshal.Copy(data.Scan0, buffer, 0, requiredLength);
 
 				for (var y = 0; y < frame.Height; y++)
 				{
@@ -880,7 +1012,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 					}
 				}
 
-				Marshal.Copy(buffer, 0, data.Scan0, buffer.Length);
+				Marshal.Copy(buffer, 0, data.Scan0, requiredLength);
 			}
 			finally
 			{
@@ -892,6 +1024,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 	private readonly PortalGeometry _geometry;
 
 	private readonly bool _enableForegroundGuard;
+
+	private readonly bool _lateLatchToCursor;
 
 	private readonly Thread _thread;
 
@@ -916,12 +1050,18 @@ internal sealed class DwmPortalOverlay : IDisposable
 	internal int CaptureSourceUpdateCount => Invoke(static manager => manager.CaptureSourceUpdateCount);
 
 	internal DwmPortalOverlay(int radius)
-		: this(PortalGeometry.Circle(radius), enableForegroundGuard: true)
+		: this(
+			PortalGeometry.Circle(radius),
+			enableForegroundGuard: true,
+			lateLatchToCursor: false)
 	{
 	}
 
 	internal DwmPortalOverlay(PortalGeometry geometry)
-		: this(geometry, enableForegroundGuard: true)
+		: this(
+			geometry,
+			enableForegroundGuard: true,
+			lateLatchToCursor: false)
 	{
 	}
 
@@ -929,9 +1069,18 @@ internal sealed class DwmPortalOverlay : IDisposable
 	/// 仅供同进程视觉夹具关闭前台守卫；生产构造路径始终传入 true。
 	/// </summary>
 	internal DwmPortalOverlay(PortalGeometry geometry, bool enableForegroundGuard)
+		: this(geometry, enableForegroundGuard, lateLatchToCursor: false)
+	{
+	}
+
+	internal DwmPortalOverlay(
+		PortalGeometry geometry,
+		bool enableForegroundGuard,
+		bool lateLatchToCursor)
 	{
 		_geometry = geometry;
 		_enableForegroundGuard = enableForegroundGuard;
+		_lateLatchToCursor = lateLatchToCursor;
 		_thread = new Thread(RunMessageLoop)
 		{
 			IsBackground = true,
@@ -1016,7 +1165,6 @@ internal sealed class DwmPortalOverlay : IDisposable
 			return;
 		}
 
-		_disposed = true;
 		try
 		{
 			Hide();
@@ -1031,6 +1179,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 			// ignore
 		}
 
+		_disposed = true;
 		_ = _thread.Join(2000);
 		_ready.Dispose();
 		GC.SuppressFinalize(this);
@@ -1040,7 +1189,10 @@ internal sealed class DwmPortalOverlay : IDisposable
 	{
 		try
 		{
-			_manager = new PortalOverlayManager(_geometry, _enableForegroundGuard);
+			_manager = new PortalOverlayManager(
+				_geometry,
+				_enableForegroundGuard,
+				_lateLatchToCursor);
 			_applicationContext = new ApplicationContext(_manager);
 			_ready.Set();
 			Application.Run(_applicationContext);

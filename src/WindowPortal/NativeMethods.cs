@@ -208,6 +208,9 @@ internal static class NativeMethods
 	[DllImport("kernel32.dll")]
 	internal static extern uint GetCurrentThreadId();
 
+	[DllImport("kernel32.dll", EntryPoint = "RtlMoveMemory")]
+	internal static extern void CopyMemory(nint destination, nint source, nuint length);
+
 	[DllImport("user32.dll", SetLastError = true)]
 	internal static extern nint SetWinEventHook(uint eventMinimum, uint eventMaximum, nint eventHookModule, WinEventCallback callback, uint processId, uint threadId, uint flags);
 

@@ -75,7 +75,10 @@ internal sealed class PortalRuntime : IDisposable
     private void Run(PortalGeometry geometry, int pollMilliseconds)
     {
         using var controller = new WindowRegionController(geometry);
-        using var visualOverlay = new DwmPortalOverlay(geometry);
+        using var visualOverlay = new DwmPortalOverlay(
+            geometry,
+            enableForegroundGuard: true,
+            lateLatchToCursor: true);
         var wasActivationHeld = false;
         var visualWarningShown = false;
         try

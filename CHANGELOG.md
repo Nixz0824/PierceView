@@ -10,6 +10,27 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 - （暂无）
 
+## [2.1.0-alpha.5] - 2026-08-11
+
+### Fixed
+
+- 修复移动透视时偶发“停一帧再跳动”的重影：`PrintWindow` 抓取完成后重新读取最新鼠标位置，并在已捕获的 64 像素安全边界内重新裁剪后再提交，避免使用抓帧前的旧坐标。
+- Fix intermittent hold-then-jump ghosting during portal motion by reading the latest pointer position after `PrintWindow`, then recropping inside the captured 64 px safety margin before presentation instead of using the pre-capture position.
+- 显示层只在首帧执行一次顶层/可见性 `SetWindowPos`，后续位置由同一次 `UpdateLayeredWindow` 整帧提交，减少重复窗口位置事务。
+- Perform the topmost/visibility `SetWindowPos` transaction only on the first frame; subsequent positions are submitted atomically with the frame through `UpdateLayeredWindow`.
+- 修复覆盖层释放时过早设置 disposed 状态、导致消息线程未能正常关闭的问题，避免暂停、改设置或测试后残留后台线程。
+- Fix overlay disposal setting its disposed state too early to close the message loop, preventing background overlay threads from lingering after pause, settings changes, or tests.
+
+### Performance
+
+- 在一次 F8 会话内复用屏幕 DC、内存 DC、DIB section 与 alpha 像素缓冲，并使用原生内存复制替代逐行临时数组，移除主要的逐帧 GDI 分配。
+- Reuse the screen DC, memory DC, DIB section, and alpha pixel buffer for the F8 session, and replace temporary row arrays with native memory copies to remove major per-frame GDI allocations.
+
+### Tests
+
+- 视觉冒烟新增提交前鼠标位置延迟锁定与换帧预算统计。最终回归中圆形平均 8.30–10.06ms、矩形平均 12.34–12.59ms；192 帧中 191 帧不超过 16.67ms，唯一超出帧为 16.69ms。延迟锁定边缘采样 0/5 异常，形状异常与过黑帧均为 0。
+- Visual smoke now covers pre-present pointer late-latching and frame-budget metrics. In the final run, circles average 8.30–10.06ms and rectangles 12.34–12.59ms; 191 of 192 frames stay within 16.67ms, with the single outlier at 16.69ms. Late-latch edge samples report 0/5 mismatches with no shape or black-frame failures.
+
 ## [2.1.0-alpha.4] - 2026-08-11
 
 ### Fixed

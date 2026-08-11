@@ -10,7 +10,7 @@
 
 PierceView is a lightweight Windows tray utility. Hold `F8` to open a selectable rounded feathered rectangle, rounded hard rectangle, or circle around the pointer, then view, scroll, or click the single window directly behind your current work. Release the key to restore the foreground window immediately.
 
-**公开版本 / Public release:** `1.0.6`　|　**本地开发版本 / Local development:** `2.1.0-alpha.4`
+**公开版本 / Public release:** `1.0.6`　|　**本地开发版本 / Local development:** `2.1.0-alpha.5`
 
 ## 为什么是寸镜 / Why PierceView
 
@@ -36,9 +36,9 @@ Many `Alt+Tab` trips are not real context switches—you only need a number, a s
 
 The 2.1 alpha adds adjustable feathering to both circles and automatically rounded rectangles; set feathering to 0 for a hard edge. The circle radius still defines the fully clear area, while feathering expands outward, so the default clear view does not shrink. Every shape keeps the stable single-layer core: each F8 session uses one fixed visual source directly behind the foreground and does not composite or switch to deeper layers. Dynamic background content keeps refreshing even when the pointer stays still.
 
-移动时，屏外单张 DWM 缩略图会额外保留 64 像素安全边界。鼠标在边界内移动只做 CPU 对齐裁剪，视觉内容和覆盖层位置在同一次 `UpdateLayeredWindow` 中提交，避免逐像素重设 DWM 来源造成的相邻帧重影。
+移动时，屏外单张 DWM 缩略图会额外保留 64 像素安全边界。鼠标在边界内移动只做 CPU 对齐裁剪；抓取完成后还会在提交前读取最新鼠标位置，用安全边界内的同一帧重新对齐。显示窗会在一次 F8 会话内复用 DIB 与内存 DC，减少重复创建 GDI 资源造成的掉帧和相邻帧重影。
 
-While moving, the single off-screen DWM thumbnail keeps a 64 px safety margin. Pointer motion inside that margin uses CPU-aligned cropping, and content plus overlay position are submitted together through `UpdateLayeredWindow`, avoiding adjacent-frame ghosting from per-pixel DWM source changes.
+While moving, the single off-screen DWM thumbnail keeps a 64 px safety margin. Motion inside it uses CPU-aligned cropping; after capture, PierceView reads the latest pointer position and realigns the same buffered frame before presentation. The display reuses its DIB and memory DC for the F8 session, reducing dropped frames and adjacent-frame ghosting caused by repeated GDI resource creation.
 
 ## 下载 / Download
 
