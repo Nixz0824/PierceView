@@ -30,6 +30,28 @@ internal readonly record struct PortalGeometry(
             Math.Min((FrameWidth - 1) / 2, (FrameHeight - 1) / 2))
         : 0;
 
+    internal int EffectiveCornerRadius
+    {
+        get
+        {
+            if (Shape != PortalShape.Rectangle)
+            {
+                return 0;
+            }
+
+            var geometryLimit = Math.Min(
+                (FrameWidth - 1) / 2,
+                (FrameHeight - 1) / 2);
+            return Math.Clamp(
+                Math.Min(FrameWidth, FrameHeight) / 6,
+                Math.Min(20, geometryLimit),
+                geometryLimit);
+        }
+    }
+
+    internal int EffectiveHitCornerRadius =>
+        Math.Max(0, EffectiveCornerRadius - EffectiveFeatherWidth);
+
     internal static PortalGeometry Circle(int radius) =>
         new(PortalShape.Circle, radius, 0, 0, 0);
 

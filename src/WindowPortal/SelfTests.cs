@@ -58,10 +58,46 @@ internal static class SelfTests
                        new NativeMethods.Rect(290, 260, 710, 540) &&
                    rectangle.CreateHitBounds(center) ==
                        new NativeMethods.Rect(290, 260, 710, 540) &&
+                   rectangle.EffectiveCornerRadius == 46 &&
+                   rectangle.EffectiveHitCornerRadius == 46 &&
                    featheredRectangle.CreateFrameBounds(center) ==
                        new NativeMethods.Rect(290, 260, 710, 540) &&
                    featheredRectangle.CreateHitBounds(center) ==
-                       new NativeMethods.Rect(314, 284, 686, 516);
+                       new NativeMethods.Rect(314, 284, 686, 516) &&
+                   featheredRectangle.EffectiveCornerRadius == 46 &&
+                   featheredRectangle.EffectiveHitCornerRadius == 22;
+        }, failures, ref total);
+
+        Check("圆角矩形物理命中区域", () =>
+        {
+            var geometry = PortalGeometry.Rectangle(420, 280, 24);
+            var bounds = geometry.CreateHitBounds(new NativeMethods.Point(210, 140));
+            var diameter = geometry.EffectiveHitCornerRadius * 2;
+            var region = NativeMethods.CreateRoundRectRgn(
+                bounds.Left,
+                bounds.Top,
+                bounds.Right,
+                bounds.Bottom,
+                diameter,
+                diameter);
+            if (region == nint.Zero)
+            {
+                return false;
+            }
+
+            try
+            {
+                return NativeMethods.PtInRegion(region, 210, 140) &&
+                       !NativeMethods.PtInRegion(region, bounds.Left, bounds.Top) &&
+                       NativeMethods.PtInRegion(
+                           region,
+                           bounds.Left + geometry.EffectiveHitCornerRadius,
+                           bounds.Top + geometry.EffectiveHitCornerRadius);
+            }
+            finally
+            {
+                _ = NativeMethods.DeleteObject(region);
+            }
         }, failures, ref total);
 
         Check(

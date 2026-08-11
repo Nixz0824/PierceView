@@ -5,8 +5,8 @@ namespace WindowPortal;
 
 /// <summary>
 /// Keeps the single visible source behind the protected host without scanning,
-/// promoting, or switching to deeper windows. PierceView 1.0 deliberately has no
-/// low-level mouse hook.
+/// promoting, or switching to deeper windows. Recovery is queued away from the
+/// DWM render thread so a click cannot synchronously block frame capture.
 /// </summary>
 internal sealed class ForegroundZOrderGuard : IDisposable
 {
@@ -16,11 +16,15 @@ internal sealed class ForegroundZOrderGuard : IDisposable
 
     private readonly NativeMethods.WinEventCallback _eventCallback;
     private readonly NonActivatingWindowGuard _interactionGuard = new();
+    private readonly object _recoveryGate = new();
+    private readonly ManualResetEventSlim _recoveryIdle = new(initialState: true);
     private nint _eventHook;
     private nint _protectedWindow;
     private nint _sourceWindow;
     private uint _sourceProcessId;
     private bool _restoringForeground;
+    private nint _pendingForegroundWindow;
+    private int _recoveryQueued;
 
     internal ForegroundZOrderGuard()
     {
@@ -101,7 +105,7 @@ internal sealed class ForegroundZOrderGuard : IDisposable
         var foreground = NativeMethods.GetForegroundWindow();
         if (BelongsToSourceApplication(foreground) || IsSourceApplicationAboveHost())
         {
-            RestoreProtectedPosition(foreground);
+            QueueProtectedPositionRecovery(foreground);
         }
     }
 
@@ -114,17 +118,26 @@ internal sealed class ForegroundZOrderGuard : IDisposable
             _ = NativeMethods.UnhookWinEvent(eventHook);
         }
 
-        _interactionGuard.Restore();
-        _protectedWindow = nint.Zero;
-        _sourceWindow = nint.Zero;
-        _sourceProcessId = 0;
-        _restoringForeground = false;
+        _ = _recoveryIdle.Wait(500);
+        lock (_recoveryGate)
+        {
+            _interactionGuard.Restore();
+            _protectedWindow = nint.Zero;
+            _sourceWindow = nint.Zero;
+            _sourceProcessId = 0;
+            _pendingForegroundWindow = nint.Zero;
+            _restoringForeground = false;
+        }
     }
 
     public void Dispose()
     {
         Restore();
         _interactionGuard.Dispose();
+        if (_recoveryIdle.Wait(2000))
+        {
+            _recoveryIdle.Dispose();
+        }
         GC.SuppressFinalize(this);
     }
 
@@ -146,12 +159,69 @@ internal sealed class ForegroundZOrderGuard : IDisposable
         {
             if (hook == _eventHook && BelongsToSourceApplication(window))
             {
-                RestoreProtectedPosition(window);
+                QueueProtectedPositionRecovery(window);
             }
         }
         catch
         {
             // WinEvent callbacks must never escape into user32.
+        }
+    }
+
+    private void QueueProtectedPositionRecovery(nint foregroundBackgroundWindow)
+    {
+        if (_eventHook == nint.Zero)
+        {
+            return;
+        }
+
+        _ = Interlocked.Exchange(ref _pendingForegroundWindow, foregroundBackgroundWindow);
+        if (Interlocked.CompareExchange(ref _recoveryQueued, 1, 0) != 0)
+        {
+            return;
+        }
+
+        _recoveryIdle.Reset();
+        if (!ThreadPool.QueueUserWorkItem(_ => RunQueuedRecovery()))
+        {
+            Volatile.Write(ref _recoveryQueued, 0);
+            _recoveryIdle.Set();
+        }
+    }
+
+    private void RunQueuedRecovery()
+    {
+        try
+        {
+            lock (_recoveryGate)
+            {
+                if (_eventHook == nint.Zero)
+                {
+                    return;
+                }
+
+                var requestedWindow = Interlocked.Exchange(
+                    ref _pendingForegroundWindow,
+                    nint.Zero);
+                var foreground = NativeMethods.GetForegroundWindow();
+                var foregroundIsSource = BelongsToSourceApplication(foreground);
+                if (!foregroundIsSource && !IsSourceApplicationAboveHost())
+                {
+                    return;
+                }
+
+                var recoveryWindow = BelongsToSourceApplication(requestedWindow)
+                    ? requestedWindow
+                    : foregroundIsSource
+                        ? foreground
+                        : _sourceWindow;
+                RestoreProtectedPosition(recoveryWindow);
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref _recoveryQueued, 0);
+            _recoveryIdle.Set();
         }
     }
 

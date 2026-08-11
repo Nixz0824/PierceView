@@ -10,6 +10,22 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 - （暂无）
 
+## [2.1.0-alpha.2] - 2026-08-11
+
+### Fixed
+
+- 修复按住 F8 且鼠标静止时透视画面停在旧帧：现在按轮询节奏持续抓取并提交来源画面，只有未变化的 DWM 裁剪参数会跳过重复设置。
+- Fix the portal freezing on an old frame while F8 is held and the pointer stays still. Source frames are now continuously captured and presented; only unchanged DWM crop properties skip redundant updates.
+- 前台/Z-order 恢复改为独立异步工作，不再在 DWM 覆盖层消息线程中同步执行，降低后台点击时的画面停顿。
+- Foreground/Z-order recovery now runs as independent asynchronous work instead of blocking the DWM overlay message thread, reducing click-time stalls.
+- 矩形使用真正的圆角 alpha 蒙版与匹配的圆角物理缺口；硬边模式保留圆角，羽化沿圆角轮廓平滑向内过渡。
+- Rectangles now use a true rounded alpha mask and matching rounded physical hole. Hard-edge mode keeps rounded corners; feathering follows the rounded contour inward.
+
+### Performance
+
+- 圆形/圆角矩形 alpha 蒙版在启用时预计算一次，避免每帧重复计算形状距离。
+- Circle and rounded-rectangle alpha masks are precomputed once on activation instead of recalculating shape distances every frame.
+
 ## [2.1.0-alpha.1] - 2026-08-11
 
 ### Added

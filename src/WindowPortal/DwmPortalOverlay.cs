@@ -9,7 +9,7 @@ using System.Windows.Forms;
 namespace WindowPortal;
 
 /// <summary>
-/// DWM 单层透视预览。圆形沿用 1.0.5 稳定路径，2.x 在同管线增加硬边/羽化矩形。
+/// DWM 单层透视预览。圆形沿用 1.0.5 稳定路径，2.x 在同管线增加圆角硬边/羽化矩形。
 /// 不用条带（条带重影）、不用「全幅+Region/双缓冲换帧」（易变方、闪圆）。
 /// 流程：屏外捕获窗上挂单张 DWM 缩略图 → 抓成位图 → CPU 形状蒙版预乘 alpha
 /// → UpdateLayeredWindow 一次提交整帧。形状与内容同帧，避免叠影与换帧闪烁。
@@ -19,13 +19,17 @@ internal sealed class DwmPortalOverlay : IDisposable
 	internal static void ApplyPremultipliedAlphaForTesting(
 		Bitmap frame,
 		PortalGeometry geometry) =>
-		PortalFrameComposer.ApplyPremultipliedAlpha(frame, geometry);
+		PortalFrameComposer.ApplyPremultipliedAlpha(
+			frame,
+			PortalFrameComposer.CreateAlphaMask(geometry));
 
 	private sealed class PortalOverlayManager : Form
 	{
 		private readonly PortalGeometry _geometry;
 
 		private readonly bool _enableForegroundGuard;
+
+		private readonly byte[] _alphaMask;
 
 		private CaptureSurface? _capture;
 
@@ -34,10 +38,6 @@ internal sealed class DwmPortalOverlay : IDisposable
 		private readonly ForegroundZOrderGuard _foregroundGuard = new();
 
 		private readonly System.Windows.Forms.Timer _zOrderGuardTimer;
-
-		private NativeMethods.Point? _lastScreenCenter;
-
-		private NativeMethods.Rect? _lastSourceRect;
 
 		private bool _portalVisible;
 
@@ -55,6 +55,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 		{
 			_geometry = geometry;
 			_enableForegroundGuard = enableForegroundGuard;
+			_alphaMask = PortalFrameComposer.CreateAlphaMask(geometry);
 			FormBorderStyle = FormBorderStyle.None;
 			ShowInTaskbar = false;
 			StartPosition = FormStartPosition.Manual;
@@ -108,8 +109,6 @@ internal sealed class DwmPortalOverlay : IDisposable
 			{
 				_zOrderGuardTimer.Start();
 			}
-			_lastScreenCenter = screenCenter;
-			_lastSourceRect = rect;
 			error = null;
 			return true;
 		}
@@ -132,21 +131,11 @@ internal sealed class DwmPortalOverlay : IDisposable
 				return false;
 			}
 
-			if (_lastScreenCenter is { } lastCenter &&
-			    lastCenter == screenCenter &&
-			    _lastSourceRect == rect)
-			{
-				error = null;
-				return true;
-			}
-
 			if (!TryPresentFrame(rect, screenCenter, out error))
 			{
 				return false;
 			}
 
-			_lastScreenCenter = screenCenter;
-			_lastSourceRect = rect;
 			error = null;
 			return true;
 		}
@@ -162,8 +151,6 @@ internal sealed class DwmPortalOverlay : IDisposable
 			_display = null;
 			_portalVisible = false;
 			_firstFrameFlushed = false;
-			_lastScreenCenter = null;
-			_lastSourceRect = null;
 			SourceWindow = nint.Zero;
 		}
 
@@ -208,7 +195,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 			using (frame)
 			{
-				PortalFrameComposer.ApplyPremultipliedAlpha(frame, _geometry);
+				PortalFrameComposer.ApplyPremultipliedAlpha(frame, _alphaMask);
 				var bounds = _geometry.CreateFrameBounds(screenCenter);
 				if (!_display.TryPresent(frame, bounds.Left, bounds.Top, out error))
 				{
@@ -242,6 +229,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 		private readonly CaptureHostForm _host;
 
 		private nint _thumbnail;
+
+		private NativeMethods.Rect? _lastSource;
 
 		internal CaptureSurface(PortalGeometry geometry)
 		{
@@ -304,6 +293,11 @@ internal sealed class DwmPortalOverlay : IDisposable
 				frame.Top - sourceWindowRect.Top,
 				frame.Right - sourceWindowRect.Left,
 				frame.Bottom - sourceWindowRect.Top);
+			if (_lastSource == source)
+			{
+				error = null;
+				return true;
+			}
 
 			var properties = new NativeMethods.DwmThumbnailProperties
 			{
@@ -326,6 +320,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 				return false;
 			}
 
+			_lastSource = source;
 			error = null;
 			return true;
 		}
@@ -428,6 +423,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 				_ = NativeMethods.DwmUnregisterThumbnail(_thumbnail);
 				_thumbnail = nint.Zero;
 			}
+			_lastSource = null;
 
 			_host.Close();
 			_host.Dispose();
@@ -658,11 +654,90 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 	private static class PortalFrameComposer
 	{
-		internal static void ApplyPremultipliedAlpha(Bitmap frame, PortalGeometry geometry)
+		internal static byte[] CreateAlphaMask(PortalGeometry geometry)
 		{
-			var radius = geometry.Radius;
-			var radiusSquared = (long)radius * radius;
+			var mask = new byte[checked(geometry.FrameWidth * geometry.FrameHeight)];
+			if (geometry.Shape == PortalShape.Circle)
+			{
+				var radius = geometry.Radius;
+				var radiusSquared = (long)radius * radius;
+				for (var y = 0; y < geometry.FrameHeight; y++)
+				{
+					var dy = y - radius;
+					for (var x = 0; x < geometry.FrameWidth; x++)
+					{
+						var dx = x - radius;
+						mask[(y * geometry.FrameWidth) + x] =
+							((long)dx * dx) + ((long)dy * dy) > radiusSquared
+								? (byte)0
+								: byte.MaxValue;
+					}
+				}
+
+				return mask;
+			}
+
+			var cornerRadius = geometry.EffectiveCornerRadius;
 			var featherWidth = geometry.EffectiveFeatherWidth;
+			var centerX = (geometry.FrameWidth - 1) / 2d;
+			var centerY = (geometry.FrameHeight - 1) / 2d;
+			var straightHalfWidth = centerX - cornerRadius;
+			var straightHalfHeight = centerY - cornerRadius;
+			for (var y = 0; y < geometry.FrameHeight; y++)
+			{
+				for (var x = 0; x < geometry.FrameWidth; x++)
+				{
+					var qx = Math.Abs(x - centerX) - straightHalfWidth;
+					var qy = Math.Abs(y - centerY) - straightHalfHeight;
+					var outsideX = Math.Max(qx, 0d);
+					var outsideY = Math.Max(qy, 0d);
+					var signedDistance =
+						Math.Sqrt((outsideX * outsideX) + (outsideY * outsideY)) +
+						Math.Min(Math.Max(qx, qy), 0d) -
+						cornerRadius;
+					mask[(y * geometry.FrameWidth) + x] =
+						CreateRoundedRectangleAlpha(signedDistance, featherWidth);
+				}
+			}
+
+			return mask;
+		}
+
+		private static byte CreateRoundedRectangleAlpha(
+			double signedDistance,
+			int featherWidth)
+		{
+			if (featherWidth <= 0)
+			{
+				return signedDistance <= 0d ? byte.MaxValue : (byte)0;
+			}
+
+			var inwardDistance = -signedDistance;
+			if (inwardDistance <= 0d)
+			{
+				return 0;
+			}
+
+			if (inwardDistance >= featherWidth)
+			{
+				return byte.MaxValue;
+			}
+
+			return (byte)Math.Clamp(
+				(int)Math.Round(
+					(inwardDistance / featherWidth) * byte.MaxValue,
+					MidpointRounding.AwayFromZero),
+				0,
+				byte.MaxValue);
+		}
+
+		internal static void ApplyPremultipliedAlpha(Bitmap frame, byte[] alphaMask)
+		{
+			if (alphaMask.Length != checked(frame.Width * frame.Height))
+			{
+				throw new ArgumentException("Alpha mask dimensions do not match the frame.", nameof(alphaMask));
+			}
+
 			var data = frame.LockBits(
 				new Rectangle(0, 0, frame.Width, frame.Height),
 				ImageLockMode.ReadWrite,
@@ -675,32 +750,11 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 				for (var y = 0; y < frame.Height; y++)
 				{
-					var dy = y - radius;
 					var row = y * stride;
 					for (var x = 0; x < frame.Width; x++)
 					{
-						var dx = x - radius;
 						var i = row + (x * 4);
-						byte alpha;
-						if (geometry.Shape == PortalShape.Circle)
-						{
-							alpha = ((long)dx * dx) + ((long)dy * dy) > radiusSquared
-								? (byte)0
-								: byte.MaxValue;
-						}
-						else if (featherWidth > 0)
-						{
-							var edgeDistance = Math.Min(
-								Math.Min(x, frame.Width - 1 - x),
-								Math.Min(y, frame.Height - 1 - y));
-							alpha = edgeDistance >= featherWidth
-								? byte.MaxValue
-								: (byte)((edgeDistance * 255 + (featherWidth / 2)) / featherWidth);
-						}
-						else
-						{
-							alpha = byte.MaxValue;
-						}
+						var alpha = alphaMask[(y * frame.Width) + x];
 
 						if (alpha == 0)
 						{

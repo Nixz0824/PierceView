@@ -282,9 +282,26 @@ internal sealed class WindowRegionController : IDisposable
 			? CreateHoleBounds(center, _geometry.Radius)
 			: _geometry.CreateHitBounds(center);
 		nint num = NativeMethods.CreateRectRgn(0, 0, windowRect.Width, windowRect.Height);
-		nint num2 = _geometry.Shape == PortalShape.Circle
-			? NativeMethods.CreateEllipticRgn(rect.Left, rect.Top, rect.Right, rect.Bottom)
-			: NativeMethods.CreateRectRgn(rect.Left, rect.Top, rect.Right, rect.Bottom);
+		nint num2;
+		if (_geometry.Shape == PortalShape.Circle)
+		{
+			num2 = NativeMethods.CreateEllipticRgn(rect.Left, rect.Top, rect.Right, rect.Bottom);
+		}
+		else if (_geometry.EffectiveHitCornerRadius > 0)
+		{
+			var cornerDiameter = checked(_geometry.EffectiveHitCornerRadius * 2);
+			num2 = NativeMethods.CreateRoundRectRgn(
+				rect.Left,
+				rect.Top,
+				rect.Right,
+				rect.Bottom,
+				cornerDiameter,
+				cornerDiameter);
+		}
+		else
+		{
+			num2 = NativeMethods.CreateRectRgn(rect.Left, rect.Top, rect.Right, rect.Bottom);
+		}
 		if (num == IntPtr.Zero || num2 == IntPtr.Zero)
 		{
 			DeleteIfOwned(num);

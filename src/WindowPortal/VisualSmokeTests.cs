@@ -75,6 +75,18 @@ internal static class VisualSmokeTests
 			UserSettings.DefaultRectangleWidth,
 			UserSettings.DefaultRectangleHeight,
 			UserSettings.DefaultFeatherWidth);
+		var hardRoundedGeometry = PortalGeometry.Rectangle(
+			UserSettings.DefaultRectangleWidth,
+			UserSettings.DefaultRectangleHeight);
+		if (!ValidateHardRoundedMask(hardRoundedGeometry, backColor, out var hardMaskDetail))
+		{
+			failures.Add("硬边圆角 alpha 蒙版异常：" + hardMaskDetail);
+		}
+		else
+		{
+			Console.WriteLine("硬边圆角 alpha 蒙版：" + hardMaskDetail);
+		}
+
 		if (!ValidateFeatherMask(featheredGeometry, backColor, out var maskDetail))
 		{
 			failures.Add("羽化 alpha 蒙版异常：" + maskDetail);
@@ -83,6 +95,8 @@ internal static class VisualSmokeTests
 		{
 			Console.WriteLine("羽化 alpha 蒙版：" + maskDetail);
 		}
+
+		RunStationaryRefreshTest(hardRoundedGeometry, frontColor, backColor, failures);
 
 		RunShape(
 			"圆形兼容模式",
@@ -93,14 +107,12 @@ internal static class VisualSmokeTests
 				LooksCircular(shot, geometry.Radius, backColor, frontColor, out detail),
 			failures);
 		RunShape(
-			"硬边矩形模式",
-			PortalGeometry.Rectangle(
-				UserSettings.DefaultRectangleWidth,
-				UserSettings.DefaultRectangleHeight),
+			"硬边圆角矩形模式",
+			hardRoundedGeometry,
 			frontColor,
 			backColor,
 			(Bitmap shot, PortalGeometry _, out string detail) =>
-				LooksHardRectangle(shot, backColor, frontColor, out detail),
+				LooksHardRoundedRectangleContent(shot, backColor, frontColor, out detail),
 			failures);
 		RunShape(
 			"羽化矩形模式",
@@ -110,6 +122,83 @@ internal static class VisualSmokeTests
 			(Bitmap shot, PortalGeometry geometry, out string detail) =>
 				LooksFeatheredRectangleContent(shot, geometry, backColor, frontColor, out detail),
 			failures);
+	}
+
+	private static void RunStationaryRefreshTest(
+		PortalGeometry geometry,
+		Color frontColor,
+		Color initialBackColor,
+		List<string> failures)
+	{
+		var updatedBackColor = Color.FromArgb(255, 40, 100, 220);
+		using var back = CreateColorWindow(
+			"PierceView Smoke Back - Stationary Refresh",
+			initialBackColor,
+			120,
+			120,
+			720,
+			520);
+		using var front = CreateColorWindow(
+			"PierceView Smoke Front - Stationary Refresh",
+			frontColor,
+			160,
+			160,
+			640,
+			460);
+		back.TopMost = false;
+		back.Show();
+		front.Show();
+		front.BringToFront();
+		front.Activate();
+		Application.DoEvents();
+		Thread.Sleep(200);
+		var center = new NativeMethods.Point(
+			front.Left + (front.Width / 2),
+			front.Top + (front.Height / 2));
+		using var overlay = new DwmPortalOverlay(geometry, enableForegroundGuard: false);
+		if (!overlay.TryShow(back.Handle, front.Handle, center, out var showError))
+		{
+			failures.Add("静止刷新测试无法显示透视：" + showError);
+			return;
+		}
+
+		Thread.Sleep(100);
+		Application.DoEvents();
+		back.BackColor = updatedBackColor;
+		back.Refresh();
+		Application.DoEvents();
+		var refreshed = false;
+		var refreshFrames = 0;
+		for (var frame = 0; frame < 24; frame++)
+		{
+			if (!overlay.TryUpdate(center, out var updateError))
+			{
+				failures.Add("静止刷新测试更新失败：" + updateError);
+				break;
+			}
+
+			refreshFrames++;
+			Application.DoEvents();
+			Thread.Sleep(16);
+			using var shot = CaptureScreenRect(center.X, center.Y, 1, 1);
+			var sample = shot.GetPixel(0, 0);
+			if (ColorDistance(sample, updatedBackColor) + 400 <
+			    ColorDistance(sample, initialBackColor))
+			{
+				refreshed = true;
+				break;
+			}
+		}
+
+		overlay.Hide();
+		front.Close();
+		back.Close();
+		Application.DoEvents();
+		Console.WriteLine($"静止持续刷新：更新成功={refreshed}，等待帧数={refreshFrames}。");
+		if (!refreshed)
+		{
+			failures.Add("鼠标静止时后台内容变化未刷新到透视画面。");
+		}
 	}
 
 	private delegate bool FrameValidator(
@@ -306,29 +395,25 @@ internal static class VisualSmokeTests
 	}
 
 	/// <summary>
-	/// 硬边矩形：四角与中心都应更像背景绿，不应残留前景红或透明圆角。
+	/// 屏幕移动采样检查硬边圆角矩形的不透明边中点与中心；圆角 alpha 由原始位图测试精确检查。
 	/// </summary>
-	private static bool LooksHardRectangle(
+	private static bool LooksHardRoundedRectangleContent(
 		Bitmap shot,
 		Color backColor,
 		Color frontColor,
 		out string detail)
 	{
-		var samples = new[]
-		{
-			shot.GetPixel(2, 2),
-			shot.GetPixel(shot.Width - 3, 2),
-			shot.GetPixel(2, shot.Height - 3),
-			shot.GetPixel(shot.Width - 3, shot.Height - 3),
-			shot.GetPixel(shot.Width / 2, shot.Height / 2)
-		};
-		var backgroundLike = samples.Count(
-			color => ColorDistance(color, backColor) + 30 < ColorDistance(color, frontColor));
+		var edge = shot.GetPixel(shot.Width / 2, 2);
+		var center = shot.GetPixel(shot.Width / 2, shot.Height / 2);
+		var edgeLikeBack =
+			ColorDistance(edge, backColor) + 30 < ColorDistance(edge, frontColor);
+		var centerLikeBack =
+			ColorDistance(center, backColor) + 30 < ColorDistance(center, frontColor);
 		detail =
-			$"backgroundLike={backgroundLike}/5, " +
-			$"centerRGB=({samples[4].R},{samples[4].G},{samples[4].B}), " +
-			$"tlRGB=({samples[0].R},{samples[0].G},{samples[0].B})";
-		return backgroundLike >= 4;
+			$"edgeBack={edgeLikeBack}, centerBack={centerLikeBack}, " +
+			$"edgeRGB=({edge.R},{edge.G},{edge.B}), " +
+			$"centerRGB=({center.R},{center.G},{center.B})";
+		return edgeLikeBack && centerLikeBack;
 	}
 
 	/// <summary>
@@ -387,16 +472,19 @@ internal static class VisualSmokeTests
 		var y = frame.Height / 2;
 		var pixels = ReadRawPixels(
 			frame,
+			(0, 0),
 			(0, y),
 			(midpointX, y),
 			(Math.Min(frame.Width - 1, feather + 2), y));
-		var outer = pixels[0];
-		var midpoint = pixels[1];
-		var inner = pixels[2];
+		var corner = pixels[0];
+		var outer = pixels[1];
+		var midpoint = pixels[2];
+		var inner = pixels[3];
 		var expectedAlpha = (midpointX * 255 + (feather / 2)) / feather;
 		var expectedMidR = (sourceColor.R * expectedAlpha + 127) / 255;
 		var expectedMidG = (sourceColor.G * expectedAlpha + 127) / 255;
 		var expectedMidB = (sourceColor.B * expectedAlpha + 127) / 255;
+		var cornerTransparent = corner == new RawPixel(0, 0, 0, 0);
 		var outerTransparent = outer == new RawPixel(0, 0, 0, 0);
 		var midpointPremultiplied =
 			Math.Abs(midpoint.A - expectedAlpha) <= 1 &&
@@ -409,9 +497,45 @@ internal static class VisualSmokeTests
 			sourceColor.R,
 			255);
 		detail =
-			$"outerTransparent={outerTransparent}, midPremultiplied={midpointPremultiplied}, " +
+			$"cornerTransparent={cornerTransparent}, outerTransparent={outerTransparent}, " +
+			$"midPremultiplied={midpointPremultiplied}, " +
 			$"innerOpaque={innerOpaque}, midBGRA=({midpoint.B},{midpoint.G},{midpoint.R},{midpoint.A})";
-		return outerTransparent && midpointPremultiplied && innerOpaque;
+		return cornerTransparent && outerTransparent && midpointPremultiplied && innerOpaque;
+	}
+
+	private static bool ValidateHardRoundedMask(
+		PortalGeometry geometry,
+		Color sourceColor,
+		out string detail)
+	{
+		using var frame = new Bitmap(
+			geometry.FrameWidth,
+			geometry.FrameHeight,
+			PixelFormat.Format32bppArgb);
+		using (var graphics = Graphics.FromImage(frame))
+		{
+			graphics.Clear(sourceColor);
+		}
+
+		DwmPortalOverlay.ApplyPremultipliedAlphaForTesting(frame, geometry);
+		var pixels = ReadRawPixels(
+			frame,
+			(0, 0),
+			(frame.Width / 2, 0),
+			(frame.Width / 2, frame.Height / 2));
+		var transparent = new RawPixel(0, 0, 0, 0);
+		var opaque = new RawPixel(
+			sourceColor.B,
+			sourceColor.G,
+			sourceColor.R,
+			255);
+		var cornerTransparent = pixels[0] == transparent;
+		var edgeOpaque = pixels[1] == opaque;
+		var centerOpaque = pixels[2] == opaque;
+		detail =
+			$"cornerTransparent={cornerTransparent}, edgeOpaque={edgeOpaque}, " +
+			$"centerOpaque={centerOpaque}, radius={geometry.EffectiveCornerRadius}";
+		return cornerTransparent && edgeOpaque && centerOpaque;
 	}
 
 	private static RawPixel[] ReadRawPixels(

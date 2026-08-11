@@ -19,7 +19,7 @@ Architecture notes for the **2.1 alpha** single-layer circle/feathered-rectangle
   │  subtract the selected shape from the host window region
   └─ DwmPortalOverlay：复制固定的后方一层来源
        copy the fixed one-layer-behind source
-       ├─ 屏外 DWM 捕获面（单张缩略图）→ 形状 alpha 蒙版 → UpdateLayeredWindow 整帧提交
+       ├─ 屏外 DWM 捕获面（单张缩略图）→ 预计算形状 alpha 蒙版 → UpdateLayeredWindow 整帧提交
        │  off-screen DWM capture → shape alpha mask → layered present
        ├─ NonActivatingWindowGuard：临时 WS_EX_NOACTIVATE
        └─ ForegroundZOrderGuard：WinEvent 恢复宿主前台
@@ -37,15 +37,16 @@ On normal launch, `Program` creates a single-instance mutex and `PierceViewAppli
 2. 在宿主 region 中减去所选圆形或矩形后，`WindowFromPoint` 得到该位置当前暴露的后方一层顶层窗口。After subtracting the selected circle or rectangle, resolve the one top-level window now exposed behind the host.
 3. 本次 F8 会话固定使用这个来源，不枚举或切换更深窗口。That source stays fixed for the hold session; deeper windows are not scanned or switched to.
 4. `DwmPortalOverlay` 用 DWM thumbnail 把来源窗口对应区域画到所选形状的预览窗。DWM thumbnails paint the matching source region into the selected portal shape.
-5. 预览在屏外窗更新单张 DWM 缩略图，抓帧后做形状预乘 alpha，再用 `UpdateLayeredWindow` 一次提交。圆形完整沿用 1.0.6 管线；硬边与羽化矩形使用同一整帧路径。Capture one DWM thumbnail off-screen, apply shape premultiplied alpha, then present once with `UpdateLayeredWindow`. The circle retains the 1.0.6 pipeline; hard and feathered rectangles use the same full-frame path.
-6. 羽化矩形的外沿 alpha 为 0，向内线性增长，在羽化宽度处达到 255。宿主窗口 region 只减去完全不透明的内矩形，因此过渡带仍保留当前层像素；预览层将后台像素叠加其上形成渐变。For a feathered rectangle, alpha starts at 0 on the outer edge and grows linearly to 255 at the feather width. The host region subtracts only the fully opaque inner rectangle, leaving foreground pixels under the transition band for the preview to blend against.
+5. 预览在屏外窗更新单张 DWM 缩略图，抓帧后套用启用时预计算的形状 alpha，再用 `UpdateLayeredWindow` 一次提交。圆形完整沿用 1.0.6 合成路径；圆角硬边与圆角羽化矩形使用同一整帧路径。Capture one DWM thumbnail off-screen, apply the shape alpha mask precomputed at activation, then present once with `UpdateLayeredWindow`. The circle retains the 1.0.6 compositing path; rounded hard and feathered rectangles use the same full-frame path.
+6. 圆角矩形的圆角半径随较短边自动计算。羽化时外轮廓 alpha 为 0，沿圆角轮廓向内线性增长，在羽化宽度处达到 255；宿主 region 只减去匹配的完全不透明圆角内区。The rounded-rectangle radius is derived automatically from its shorter side. With feathering, alpha starts at 0 on the outer contour and grows linearly inward to 255 at the feather width; the host region subtracts the matching fully opaque rounded inner area.
+7. 运行线程在 F8 按住期间每轮都抓取和提交画面，即使鼠标与来源窗口位置不变；只有未改变的 DWM 裁剪参数跳过重复设置。The runtime captures and presents every polling cycle while F8 is held, even when pointer and source-window positions stay unchanged; only unchanged DWM crop properties skip redundant updates.
 6. 松开 F8 时先隐藏预览，再恢复宿主 region 和来源扩展样式。On release, hide the preview, then restore the host region and source extended styles.
 
 ## 交互与前台保护 / Input and foreground protection
 
-寸镜不转发或合成鼠标事件。圆形缺口让 Windows 自己把真实鼠标事件送给下面的窗口。透视期间，来源窗口临时增加 `WS_EX_NOACTIVATE`；若来源仍主动争夺前台，WinEvent 守卫把它放回宿主之后并恢复宿主前台。
+寸镜不转发或合成鼠标事件。形状缺口让 Windows 自己把真实鼠标事件送给下面的窗口。透视期间，来源窗口临时增加 `WS_EX_NOACTIVATE`；若来源仍主动争夺前台，WinEvent 守卫在独立后台工作中把它放回宿主之后并恢复宿主前台，避免同步阻塞 DWM 抓帧。
 
-PierceView does not synthesize mouse input. The circular hole lets Windows deliver real pointer events to the window beneath. During a session the source temporarily gains `WS_EX_NOACTIVATE`; if it still steals focus, a WinEvent guard restores the host order and foreground.
+PierceView does not synthesize mouse input. The shape hole lets Windows deliver real pointer events to the window beneath. During a session the source temporarily gains `WS_EX_NOACTIVATE`; if it still steals focus, a WinEvent guard restores host order and foreground on independent background work so DWM frame capture is not synchronously blocked.
 
 1.0 没有全局低级鼠标钩子，也没有深层命中识别或后台窗口提升算法。
 

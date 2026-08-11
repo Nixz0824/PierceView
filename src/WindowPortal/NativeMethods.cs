@@ -259,6 +259,15 @@ internal static class NativeMethods
 	internal static extern nint CreateRectRgn(int left, int top, int right, int bottom);
 
 	[DllImport("gdi32.dll", SetLastError = true)]
+	internal static extern nint CreateRoundRectRgn(
+		int left,
+		int top,
+		int right,
+		int bottom,
+		int ellipseWidth,
+		int ellipseHeight);
+
+	[DllImport("gdi32.dll", SetLastError = true)]
 	internal static extern nint CreateEllipticRgn(int left, int top, int right, int bottom);
 
 	[DllImport("gdi32.dll", SetLastError = true)]
