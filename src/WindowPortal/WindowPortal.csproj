@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -9,10 +10,10 @@
     <AssemblyName>PierceView</AssemblyName>
     <RootNamespace>WindowPortal</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>2.1.0</Version>
-    <AssemblyVersion>2.1.0.0</AssemblyVersion>
-    <FileVersion>2.1.0.0</FileVersion>
-    <InformationalVersion>2.1.0</InformationalVersion>
+    <Version>2.2.0-gpu-alpha.1</Version>
+    <AssemblyVersion>2.2.0.0</AssemblyVersion>
+    <FileVersion>2.2.0.0</FileVersion>
+    <InformationalVersion>2.2.0-gpu-alpha.1</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>寸镜 / PierceView</Product>
     <Company>PierceView Project</Company>
@@ -23,5 +24,10 @@
   <ItemGroup>
     <EmbeddedResource Include="..\..\assets\brand\pierceview-logo.png"
                       LogicalName="PierceView.Logo.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.DirectComposition" Version="3.8.3" />
   </ItemGroup>
 </Project>

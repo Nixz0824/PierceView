@@ -75,10 +75,7 @@ internal sealed class PortalRuntime : IDisposable
     private void Run(PortalGeometry geometry, int pollMilliseconds)
     {
         using var controller = new WindowRegionController(geometry);
-        using var visualOverlay = new DwmPortalOverlay(
-            geometry,
-            enableForegroundGuard: true,
-            lateLatchToCursor: true);
+        using var visualOverlay = new AdaptivePortalOverlay(geometry);
         using var highResolutionWaiter = new HighResolutionWaiter();
         var wasActivationHeld = false;
         var visualWarningShown = false;
@@ -166,16 +163,25 @@ internal sealed class PortalRuntime : IDisposable
                 }
 
                 wasActivationHeld = activationHeld;
-				// CPU 抓帧目标约 120Hz，但安全画布中的缓存帧位置仍以约 4ms 节奏跟随鼠标。
-				// 只有按住 F8 时启用高频等待，不改变托盘空闲时的功耗。
-				var targetLoopMilliseconds = activationHeld
-					? Math.Min(pollMilliseconds, 4)
-					: pollMilliseconds;
-				var remainingMilliseconds =
-					targetLoopMilliseconds - Stopwatch.GetElapsedTime(loopStartedAt).TotalMilliseconds;
+                var targetLoopMilliseconds =
+                    activationHeld
+                        ? Math.Min(
+                            pollMilliseconds,
+                            visualOverlay.IsGpuActive ? 2 : 4)
+                        : pollMilliseconds;
+                var remainingMilliseconds =
+                    targetLoopMilliseconds -
+                    Stopwatch.GetElapsedTime(loopStartedAt).TotalMilliseconds;
                 if (remainingMilliseconds >= 1)
                 {
-					highResolutionWaiter.Wait(remainingMilliseconds);
+                    if (activationHeld)
+                    {
+                        highResolutionWaiter.Wait(remainingMilliseconds);
+                    }
+                    else
+                    {
+                        Thread.Sleep((int)Math.Floor(remainingMilliseconds));
+                    }
                 }
                 else
                 {
@@ -196,7 +202,7 @@ internal sealed class PortalRuntime : IDisposable
 
     private static bool TryUpdateVisualPortal(
         WindowRegionController controller,
-        DwmPortalOverlay visualOverlay,
+        AdaptivePortalOverlay visualOverlay,
         NativeMethods.Point screenPoint,
         out string? error)
     {

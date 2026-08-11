@@ -71,6 +71,8 @@ internal static class NativeMethods
 
 	internal const uint DwmwaCloaked = 14u;
 
+	internal const uint DwmwaExtendedFrameBounds = 9u;
+
 	internal const uint DwmTnpRectDestination = 1u;
 
 	internal const uint DwmTnpRectSource = 2u;
@@ -290,6 +292,9 @@ internal static class NativeMethods
 
 	[DllImport("dwmapi.dll")]
 	internal static extern int DwmGetWindowAttribute(nint window, uint attribute, out int value, int valueSize);
+
+	[DllImport("dwmapi.dll")]
+	internal static extern int DwmGetWindowAttribute(nint window, uint attribute, out Rect value, int valueSize);
 
 	[DllImport("dwmapi.dll")]
 	internal static extern int DwmRegisterThumbnail(nint destination, nint source, out nint thumbnail);

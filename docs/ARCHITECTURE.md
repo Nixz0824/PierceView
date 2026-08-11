@@ -17,12 +17,10 @@ Architecture notes for the **2.1.0 CPU Edition** single-layer feathered-circle/r
   ├─ GetAsyncKeyState(F8) + 鼠标坐标 / pointer position
   ├─ WindowRegionController：在鼠标中心维护小型交互孔
   │  maintain a small input aperture around the pointer
-  └─ DwmPortalOverlay：复制固定的后方一层来源
-       copy the fixed one-layer-behind source
-       ├─ 屏外 DWM 捕获面（单张缩略图）→ 预计算形状 alpha 蒙版 → UpdateLayeredWindow 整帧提交
-       │  off-screen DWM capture → shape alpha mask → layered present
-       ├─ NonActivatingWindowGuard：临时 WS_EX_NOACTIVATE
-       └─ ForegroundZOrderGuard：WinEvent 恢复宿主前台
+  └─ AdaptivePortalOverlay：优先 GPU，失败时回退 CPU
+       prefer GPU, fall back to CPU on failure
+       ├─ GpuPortalOverlay：WGC(HWND) → D3D11 常驻纹理 → HLSL 裁剪/形状/羽化 → DirectComposition
+       └─ DwmPortalOverlay：屏外 DWM → PrintWindow/BitBlt → CPU alpha → UpdateLayeredWindow
 ```
 
 ## 托盘生命周期 / Tray lifecycle
@@ -36,11 +34,13 @@ On normal launch, `Program` creates a single-instance mutex and `PierceViewAppli
 1. F8 首次按下时，`WindowRegionController` 锁定鼠标下的宿主顶层 HWND，并保存其原始 region。On first F8 press, lock the top-level host HWND under the pointer and save its original region.
 2. 在宿主 region 的鼠标中心减去一个小型圆形交互孔后，`WindowFromPoint` 得到该位置当前暴露的后方一层顶层窗口。视觉区域仍由独立覆盖层完整绘制。After subtracting a small circular input aperture around the pointer, resolve the one top-level window now exposed behind the host. The separate layered overlay still draws the full visual portal.
 3. 本次 F8 会话固定使用这个来源，不枚举或切换更深窗口。That source stays fixed for the hold session; deeper windows are not scanned or switched to.
-4. `DwmPortalOverlay` 用 DWM thumbnail 把来源窗口对应区域画到所选形状的预览窗。DWM thumbnails paint the matching source region into the selected portal shape.
-5. 屏外捕获窗维护单张比透视形状四周各大 96 像素的 DWM 缩略图；用户可见的分层显示窗则固定覆盖整个 Windows 虚拟屏幕。捕获来源越过 96 像素边界时只更新屏外 DWM 映射，顶层显示 HWND 在本次 F8 会话内不移动。显示 DIB 仅清除上一透视矩形并写入新的预乘 alpha 像素。`PrintWindow` 完成后再次读取鼠标坐标，每轮只提交缓存帧或新抓帧中的一种。The off-screen capture host keeps one DWM thumbnail with a 96 px margin, while the user-visible layered surface stays fixed across the complete Windows virtual screen. Crossing the capture margin updates only the off-screen DWM mapping; the top-level display HWND never moves during the F8 session. Its DIB clears the previous portal rectangle and writes the new premultiplied-alpha pixels. After `PrintWindow`, the pointer is read again, and each update presents either one cached or one fresh frame.
-6. 圆形设置半径代表完全清晰的内圆，羽化带向外扩展。矩形圆角半径随较短边自动计算。物理交互孔使用 32 像素半径并以 16 像素阈值锚定：指针在孔内的小幅移动仍由 Windows 原生命中后台，但不会每个渲染循环都改写宿主 Region；视觉层先提交，再把最终坐标交给交互孔。The circle setting defines the fully clear inner radius and feathering expands outward; rectangle corner radius follows the shorter side. The physical input aperture uses a 32 px radius with a 16 px anchoring threshold: small pointer movement stays natively routed to the background without rewriting the host Region every render tick. The visual layer presents first, then hands its committed center to the aperture.
-7. F8 按住期间，运行线程使用高精度可等待定时器以约 4ms 目标间隔轮询。鼠标位置变化可复用最近的原始抓帧重绘，后台内容捕获以约 120Hz 为目标；这样在控制 CPU 路径成本的同时，缩短高刷新率屏幕上陈旧内容的停留时间。While F8 is held, the runtime uses a high-resolution waitable timer with an approximately 4ms target interval. Pointer changes can redraw from the latest raw frame, while background capture targets roughly 120Hz, shortening stale-content dwell on high-refresh displays while keeping the CPU path bounded.
-8. 松开 F8 时先隐藏预览，再恢复宿主 region 和来源扩展样式。On release, hide the preview, then restore the host region and source extended styles.
+4. `AdaptivePortalOverlay` 优先建立 WGC/D3D11 会话。WGC 只在来源内容更新时产生新帧，新帧会整帧拷贝到可作为 shader resource 的常驻默认纹理。鼠标移动不等待新捕获帧，而是直接用最新纹理重新计算裁剪坐标。`AdaptivePortalOverlay` prefers a WGC/D3D11 session. WGC produces a new frame only when source content changes; each frame is copied into a persistent default texture usable as a shader resource. Pointer motion does not wait for another capture frame and instead recalculates the crop against the latest texture.
+5. 全屏三角形 pixel shader 同时执行一比一采样、圆形/圆角矩形 signed-distance mask 和羽化预乘 alpha。一张两缓冲 BGRA 交换链通过 DirectComposition 附着到点击穿透的顶层窗口，最大帧延迟设为 1。A fullscreen-triangle pixel shader performs one-to-one sampling, circle/rounded-rectangle signed-distance masking, feathering, and premultiplied alpha. A two-buffer BGRA swap chain is attached to a click-through top-level HWND through DirectComposition with maximum frame latency set to one.
+6. GPU 活动时，运行线程使用高精度可等待定时器以约 2ms 目标间隔轮询；交换链/合成器自然提供背压。只有鼠标像素位置或 WGC 帧序号改变时才重新提交。While GPU rendering is active, the runtime uses a high-resolution waitable timer with an approximately 2 ms target interval; the swap chain/compositor provides natural backpressure. A new present occurs only when the pointer pixel or WGC frame serial changes.
+7. 若 GPU 初始化、WGC 会话或帧处理失败，当次会话切换到 2.1.0 CPU 终版路径：固定虚拟屏幕显示层 + 屏外单张 DWM 缩略图 + 96 像素捕获边界 + `PrintWindow/BitBlt` + CPU 预乘 alpha + `UpdateLayeredWindow`。If GPU initialization, the WGC session, or frame handling fails, the session switches to the 2.1.0 CPU final path: a fixed virtual-screen display surface + one off-screen DWM thumbnail + 96 px capture margin + `PrintWindow/BitBlt` + CPU premultiplied alpha + `UpdateLayeredWindow`.
+8. 圆形设置半径代表完全清晰的内圆，羽化带向外扩展。矩形圆角半径随较短边自动计算。物理交互孔使用 32 像素半径与 16 像素锚定阈值；视觉层先提交，再把最终坐标交给交互孔，从而保留真实点击、滚动与拖放并避免前后台交替命中。The circle setting defines the fully clear inner radius and feathering expands outward; rectangle corner radius follows the shorter side. The physical input aperture uses a 32 px radius and 16 px anchoring threshold. The visual layer presents first and hands its final coordinate to the aperture, preserving native click, wheel, and drag while avoiding alternating foreground/background hits.
+9. GPU 路径由 WGC 事件驱动来源纹理更新，由运行线程驱动鼠标裁剪；CPU 回退路径仍在 F8 按住期间持续抓取和提交。The GPU path updates its source texture from WGC events and pointer cropping from the runtime thread; the CPU fallback continues to capture and present throughout the F8 hold.
+10. 松开 F8 时先隐藏预览，再恢复宿主 region 和来源扩展样式。On release, hide the preview, then restore the host region and source extended styles.
 
 ## 交互与前台保护 / Input and foreground protection
 
@@ -55,7 +55,8 @@ Version 1.0 has no global low-level mouse hook, no deep hit-testing, and no back
 ## 线程与恢复 / Threads and restore
 
 - UI 线程：托盘和设置。UI thread: tray and settings.
-- 运行线程：F8、物理 region、单层会话状态。Runtime thread: F8, physical region, session state.
+- 运行 STA 线程：F8、物理 region、GPU 裁剪/提交与单层会话状态。Runtime STA thread: F8, physical region, GPU crop/present, and session state.
+- WGC FreeThreaded 回调：将最新捕获帧拷贝到常驻纹理。WGC FreeThreaded callback: copy the newest captured frame into the persistent texture.
 - DWM STA 线程：预览窗口和 DWM thumbnail。DWM STA thread: preview windows and thumbnails.
 
 正常松键、暂停、设置重启运行时、托盘退出和普通进程退出都会执行同一恢复路径。强制结束进程无法保证托管清理，因此不要在 F8 按住时用任务管理器强制结束。
@@ -64,6 +65,10 @@ Release, pause, settings-driven restart, tray exit, and normal process exit shar
 
 ## 已知技术边界 / Technical boundaries
 
-圆形和圆角矩形都由分层位图 alpha 蒙版保证。32 像素锚定物理交互孔使用 `SetWindowRgn(..., redraw: true)`，并跟随视觉层实际提交的最终坐标。`--visual-smoke` 覆盖固定虚拟屏幕显示 HWND、单轮单次提交、最终坐标回传、静止刷新、真实鼠标移动、后台 Hover、内容坐标对齐、旧位置恢复、换帧预算、羽化 alpha、黑帧和形状回归；独立窗口测试还会断言滚轮只到后台、前台滚轮计数为零。
+GPU 形状由 HLSL signed-distance mask 保证，CPU 回退形状由分层位图 alpha 蒙版保证。`--gpu-probe` 验证 WGC/D3D11/DirectComposition/HLSL，`--gpu-portal-smoke-hwnd` 验证常驻纹理与高精度移动裁剪，`--visual-smoke` 继续覆盖 CPU 管线的黑帧、形状和坐标回归。受保护内容、某些游戏/反作弊窗口、无重定向表面或驱动限制可能让 WGC 只返回空白/静态帧；这些情况不通过注入、驱动或绕过保护来解决。
 
-Both circles and rounded rectangles are guaranteed by layered bitmap alpha. The 32 px anchored physical input aperture uses `SetWindowRgn(..., redraw: true)` and follows the visual layer's committed center. `--visual-smoke` covers the fixed virtual-screen display HWND, one presentation per update, committed-center hand-off, stationary refresh, real-pointer motion, background hover, content alignment, old-position restoration, frame budgets, feather alpha, black frames, and shape regressions. The independent-window probe additionally asserts that wheel input reaches only the background while the foreground wheel count remains zero.
+GPU shapes are produced by HLSL signed-distance masks, while CPU fallback shapes use layered-bitmap alpha masks. `--gpu-probe` verifies WGC/D3D11/DirectComposition/HLSL, `--gpu-portal-smoke-hwnd` covers persistent textures and high-resolution motion cropping, and `--visual-smoke` retains CPU black-frame, shape, and alignment regressions. Protected content, some game/anti-cheat windows, non-redirected surfaces, or driver restrictions may make WGC return blank or static frames; PierceView does not use injection, drivers, or protection bypasses to work around them.
+
+32 像素锚定物理交互孔继续使用 `SetWindowRgn(..., redraw: true)` 并跟随视觉层实际提交的最终坐标。独立窗口测试断言滚轮只到后台、前台滚轮计数为零，同时覆盖点击、前台保持、Z-order 与样式恢复。
+
+The 32 px anchored physical input aperture continues to use `SetWindowRgn(..., redraw: true)` and follows the visual layer's committed center. The independent-window probe asserts background-only wheel delivery with zero foreground wheel input, alongside click delivery, foreground preservation, Z-order, and style restoration.

@@ -112,7 +112,28 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 - 视觉冒烟新增稳定画布重定位、缓存即时提交和旧位置清除断言；真实鼠标/Hover 坐标采样为 `0/384` 异常，四种形状无黑帧或形状异常，最终换帧平均约 `5.17–5.28ms`、最慢 `9.12ms`。
 - Visual smoke now asserts stable-canvas relocation, immediate cached presentation, and stale-position cleanup. Real-pointer/hover alignment reports `0/384` mismatches; all four shapes have no black or invalid frames, with final average updates around `5.17–5.28ms` and a `9.12ms` maximum.
+## [2.1.0-alpha.6] - 2026-08-11
 
+### Added
+
+- 新增实验性 GPU 单层管线：按 HWND 使用 Windows.Graphics.Capture，将最新完整来源帧常驻在 D3D11 纹理中，再由 HLSL 完成鼠标位置裁剪、圆形/圆角矩形与羽化，通过 DirectComposition 交换链提交。
+- Add an experimental single-layer GPU pipeline: capture an HWND with Windows.Graphics.Capture, keep the latest complete source frame in a persistent D3D11 texture, apply pointer cropping plus circle/rounded-rectangle feathering in HLSL, and present through a DirectComposition swap chain.
+- 新增 `--gpu-probe`、`--gpu-smoke-hwnd` 与 `--gpu-portal-smoke-hwnd` 诊断入口，分别验证 GPU/WGC 前置条件、最小帧闭环和常驻纹理移动裁剪。
+- Add `--gpu-probe`, `--gpu-smoke-hwnd`, and `--gpu-portal-smoke-hwnd` diagnostics for GPU/WGC prerequisites, the minimum frame loop, and persistent-texture motion cropping.
+
+### Changed
+
+- 生产运行时优先 GPU；初始化不可用或会话中捕获失败时，自动回退到 alpha.5 的 DWM thumbnail → PrintWindow/BitBlt → CPU alpha → UpdateLayeredWindow 管线。
+- Prefer the GPU renderer at runtime and automatically fall back to alpha.5's DWM thumbnail → PrintWindow/BitBlt → CPU alpha → UpdateLayeredWindow pipeline when initialization or a capture session fails.
+- GPU 活动期使用 Windows 高精度可等待定时器，避免 `Thread.Sleep(2)` 被约 15.6ms 普通定时粒度限制在约 60–64Hz。
+- Use a Windows high-resolution waitable timer while the GPU backend is active so `Thread.Sleep(2)` is not quantized to the ordinary ~15.6 ms timer interval and capped near 60–64 Hz.
+
+### Tests
+
+- 2560×1440 @ 260Hz、RTX 5070 实机：GPU 透视冒烟 4 秒调度 1549 次，静态 WGC 帧 1 张可独立生成 714 次不同位置提交；更新耗时 P95 0.81ms、P99 1.14ms、最慢 3.40ms，低于 260Hz 的 3.85ms 单刷新周期。
+- On a 2560×1440 @ 260Hz RTX 5070 system, the 4-second GPU portal smoke schedules 1,549 updates and turns one static WGC source frame into 714 distinct-position presents; update latency is P95 0.81ms, P99 1.14ms, and 3.40ms maximum, below the 3.85ms refresh interval at 260Hz.
+- 原 DWM/CPU `--visual-smoke --radius 120` 继续通过：圆形/矩形形状异常和疑似过黑均为 0，移动与 Hover 坐标异常采样为 0/384。
+- The original DWM/CPU `--visual-smoke --radius 120` still passes with zero circle/rectangle shape or suspected-black failures and 0/384 motion/hover alignment mismatches.
 ## [2.1.0-alpha.5] - 2026-08-11
 
 ### Fixed

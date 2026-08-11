@@ -13,6 +13,9 @@ internal sealed record PortalOptions(
     int ProbeDurationMilliseconds,
     bool SelfTest,
     bool VisualSmoke,
+    bool GpuProbe,
+    nint? GpuSmokeWindow,
+    nint? GpuPortalSmokeWindow,
     bool ListWindows,
     bool ShowVersion,
     bool ShowHelp,
@@ -30,6 +33,9 @@ internal sealed record PortalOptions(
         var probeDurationMilliseconds = 1500;
         var selfTest = false;
         var visualSmoke = false;
+        var gpuProbe = false;
+        nint? gpuSmokeWindow = null;
+        nint? gpuPortalSmokeWindow = null;
         var listWindows = false;
         var showVersion = false;
         var showHelp = false;
@@ -72,6 +78,16 @@ internal sealed record PortalOptions(
                 case "--visual-smoke":
                     visualSmoke = true;
                     break;
+                case "--gpu-probe":
+                    gpuProbe = true;
+                    break;
+                case "--gpu-smoke-hwnd":
+                    gpuSmokeWindow = ParseWindowHandle(NextValue(args, ref index, argument));
+                    break;
+                case "--gpu-portal-smoke-hwnd":
+                    gpuPortalSmokeWindow = ParseWindowHandle(
+                        NextValue(args, ref index, argument));
+                    break;
                 case "--list-windows":
                     listWindows = true;
                     break;
@@ -98,6 +114,9 @@ internal sealed record PortalOptions(
         var exclusiveModeCount =
             (selfTest ? 1 : 0) +
             (visualSmoke ? 1 : 0) +
+            (gpuProbe ? 1 : 0) +
+            (gpuSmokeWindow.HasValue ? 1 : 0) +
+            (gpuPortalSmokeWindow.HasValue ? 1 : 0) +
             (listWindows ? 1 : 0) +
             (showVersion ? 1 : 0) +
             (probeWindow.HasValue ? 1 : 0) +
@@ -105,7 +124,7 @@ internal sealed record PortalOptions(
         if (exclusiveModeCount > 1)
         {
             throw new ArgumentException(
-                "--self-test、--visual-smoke、--list-windows、--version、--probe-hwnd 和 --inspect-hwnd 不能同时使用。");
+                "--self-test、--visual-smoke、--gpu-probe、--gpu-smoke-hwnd、--gpu-portal-smoke-hwnd、--list-windows、--version、--probe-hwnd 和 --inspect-hwnd 不能同时使用。");
         }
 
         if (inspectPoint.HasValue && !inspectWindow.HasValue)
@@ -124,6 +143,9 @@ internal sealed record PortalOptions(
             probeDurationMilliseconds,
             selfTest,
             visualSmoke,
+            gpuProbe,
+            gpuSmokeWindow,
+            gpuPortalSmokeWindow,
             listWindows,
             showVersion,
             showHelp,

@@ -10,7 +10,7 @@
 
 PierceView is a lightweight Windows tray utility. Hold `F8` to open a selectable rounded feathered rectangle, rounded hard rectangle, or circle around the pointer, then view, scroll, or click the single window directly behind your current work. Release the key to restore the foreground window immediately.
 
-**当前公开版本 / Current public release:** `2.1.0 CPU Edition / CPU 版本`
+**当前公开版本 / Current public release:** `2.1.0 CPU Edition / CPU 版本`　|　**本地 GPU 开发版本 / Local GPU development:** `2.2.0-gpu-alpha.1`
 
 ## 为什么是寸镜 / Why PierceView
 
@@ -41,6 +41,14 @@ CPU 版本把屏外 DWM 捕获面保留为透视形状四周各大 96 像素的�
 The CPU build keeps the off-screen DWM capture surface as a small canvas with a 96 px margin, while the user-visible layered surface stays fixed across the Windows virtual screen for the entire F8 session and updates only its transparent pixels—the native display HWND no longer follows capture-boundary moves. Background capture targets roughly 120Hz and each runtime tick presents one final frame. A 32 px anchored input aperture handles native interaction: small pointer motion inside the hole does not rewrite the host Region, and recentering occurs only after crossing a 16 px threshold, reducing both stale-path flashes and wheel routing that alternates between foreground and background.
 
 ![寸镜 PierceView 2.1.0 CPU 版本：固定显示层、单帧同步与后台独占交互 / PierceView 2.1.0 CPU Edition: fixed display surface, one-frame hand-off, and background-only input](assets/readme/cpu-edition-upgrade.svg)
+
+本地 `2.2.0-gpu-alpha.1` 开发线在支持的 Windows 10/11 机器上优先使用 `Windows.Graphics.Capture → D3D11 常驻纹理 → GPU 形状/羽化着色器 → DirectComposition`。后台页面只需生成新内容帧，鼠标移动可以直接从最新的显存纹理重新裁剪，不再每次经过 `PrintWindow` 和 CPU 像素合成。GPU 路径不可用或会话中出错时，会自动回退到已发布的 2.1.0 CPU 稳定管线。
+
+On supported Windows 10/11 systems, the local `2.2.0-gpu-alpha.1` development line prefers `Windows.Graphics.Capture → persistent D3D11 texture → GPU shape/feather shader → DirectComposition`. The source only needs to produce new content frames; pointer motion recrops the latest GPU texture directly instead of running every move through `PrintWindow` and CPU pixel composition. If the GPU path is unavailable or fails during a session, PierceView automatically falls back to the released 2.1.0 CPU pipeline.
+
+回退路径完整保留 2.1.0 CPU 终版的固定虚拟屏幕显示层、96 像素屏外捕获边界、单轮单次提交与 32 像素锚定交互孔。
+
+The fallback preserves the complete 2.1.0 CPU final path: a fixed virtual-screen display surface, 96 px off-screen capture margin, one presentation per update, and a 32 px anchored input aperture.
 
 ## 下载 / Download
 

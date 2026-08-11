@@ -50,6 +50,25 @@ internal static class Program
             return VisualSmokeTests.Run(options.Radius);
         }
 
+        if (options.GpuProbe)
+        {
+            return GpuCapabilityProbe.Run();
+        }
+
+        if (options.GpuSmokeWindow is { } gpuSmokeWindow)
+        {
+            return GpuCaptureSmokeTests.Run(
+                gpuSmokeWindow,
+                options.ProbeDurationMilliseconds);
+        }
+
+        if (options.GpuPortalSmokeWindow is { } gpuPortalSmokeWindow)
+        {
+            return GpuPortalSmokeTests.Run(
+                gpuPortalSmokeWindow,
+                options.ProbeDurationMilliseconds);
+        }
+
         if (options.ListWindows)
         {
             return WindowInventory.PrintVisibleWindows();
@@ -368,6 +387,9 @@ internal static class Program
             "  PierceView --probe-hwnd <句柄> [--probe-duration-ms <毫秒>] [--radius <像素>]\n" +
             "  PierceView --self-test\n" +
             "  PierceView --visual-smoke [--radius <像素>]\n" +
+            "  PierceView --gpu-probe\n" +
+            "  PierceView --gpu-smoke-hwnd <句柄> [--probe-duration-ms <毫秒>]\n" +
+            "  PierceView --gpu-portal-smoke-hwnd <句柄> [--probe-duration-ms <毫秒>]\n" +
             "  PierceView --list-windows\n" +
             "  PierceView --inspect-hwnd <句柄> [--inspect-point <屏幕X> <屏幕Y>]\n" +
             "  PierceView --version\n\n" +
@@ -381,6 +403,9 @@ internal static class Program
             "  --probe-duration-ms   探测持续时间，默认 1500\n" +
             "  --self-test           运行无需桌面窗口的纯逻辑自检\n" +
             "  --visual-smoke        自动视觉冒烟（采样圆形、矩形、羽化与闪黑回归）\n" +
+            "  --gpu-probe           检测 WGC、硬件 D3D11、DirectComposition 与当前刷新率\n" +
+            "  --gpu-smoke-hwnd      将指定 HWND 的 WGC 帧显示在 GPU 硬边矩形测试窗\n" +
+            "  --gpu-portal-smoke-hwnd  验证 GPU 常驻纹理、移动裁剪、圆角与羽化\n" +
             "  --list-windows        列出可见顶层窗口、进程、类名和 HWND\n" +
             "  --inspect-hwnd        输出目标窗口的父子、所有者和 Z-order 诊断\n" +
             "  --inspect-point       指定诊断坐标；默认使用窗口中心");

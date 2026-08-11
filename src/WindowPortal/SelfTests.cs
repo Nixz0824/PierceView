@@ -20,6 +20,29 @@ internal static class SelfTests
             return options.Radius == 240 && options.PollMilliseconds == 8;
         }, failures, ref total);
 
+        Check("GPU 探针独占模式", () =>
+        {
+            var options = PortalOptions.Parse(["--gpu-probe"]);
+            return options.GpuProbe &&
+                   Throws<ArgumentException>(() =>
+                       PortalOptions.Parse(["--gpu-probe", "--self-test"]));
+        }, failures, ref total);
+
+        Check("GPU 闭环测试参数", () =>
+        {
+            var options = PortalOptions.Parse(
+                ["--gpu-smoke-hwnd", "0x1234", "--probe-duration-ms", "900"]);
+            return options.GpuSmokeWindow == 0x1234 &&
+                   options.ProbeDurationMilliseconds == 900;
+        }, failures, ref total);
+
+        Check("GPU 透视渲染测试参数", () =>
+        {
+            var options = PortalOptions.Parse(
+                ["--gpu-portal-smoke-hwnd", "4660"]);
+            return options.GpuPortalSmokeWindow == 0x1234;
+        }, failures, ref total);
+
         Check(
             "十六进制窗口句柄",
             () => PortalOptions.ParseWindowHandle("0x1234") == 0x1234,
