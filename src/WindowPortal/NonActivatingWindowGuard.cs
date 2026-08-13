@@ -78,19 +78,24 @@ internal sealed class NonActivatingWindowGuard : IDisposable
 		return true;
 	}
 
+	internal bool TryRemove(nint window)
+	{
+		if (!_windows.Remove(window, out var guardedWindowState))
+		{
+			return false;
+		}
+
+		RestoreWindow(window, guardedWindowState);
+		return true;
+	}
+
 	internal void Restore()
 	{
 		KeyValuePair<nint, GuardedWindowState>[] array = _windows.ToArray();
 		_windows.Clear();
 		foreach (var keyValuePair in array)
 		{
-			var window = keyValuePair.Key;
-			var guardedWindowState2 = keyValuePair.Value;
-			if (guardedWindowState2.ChangedStyle && IsSameWindow(window, guardedWindowState2.ProcessId))
-			{
-				NativeMethods.SetWindowLongPtr(window, -20, guardedWindowState2.OriginalExtendedStyle);
-				RefreshWindowStyle(window);
-			}
+			RestoreWindow(keyValuePair.Key, keyValuePair.Value);
 		}
 	}
 
@@ -108,6 +113,23 @@ internal sealed class NonActivatingWindowGuard : IDisposable
 		}
 		NativeMethods.GetWindowThreadProcessId(window, out var processId);
 		return processId == expectedProcessId;
+	}
+
+	private static void RestoreWindow(
+		nint window,
+		GuardedWindowState guardedWindowState)
+	{
+		if (!guardedWindowState.ChangedStyle ||
+			!IsSameWindow(window, guardedWindowState.ProcessId))
+		{
+			return;
+		}
+
+		NativeMethods.SetWindowLongPtr(
+			window,
+			NativeMethods.GwlExStyle,
+			guardedWindowState.OriginalExtendedStyle);
+		RefreshWindowStyle(window);
 	}
 
 	private static bool RefreshWindowStyle(nint window)

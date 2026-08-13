@@ -66,6 +66,26 @@ internal sealed class AdaptivePortalOverlay : IDisposable
         _ => 0,
     };
 
+    internal int SourceReconciliationCount => activeBackend switch
+    {
+        ActiveBackend.Gpu => gpuOverlay?.SourceReconciliationCount ?? 0,
+        _ => 0,
+    };
+
+    internal int SourceReplacementCount => activeBackend switch
+    {
+        ActiveBackend.Gpu => gpuOverlay?.SourceReplacementCount ?? 0,
+        _ => 0,
+    };
+
+    internal IReadOnlyList<nint> SourceWindows => activeBackend switch
+    {
+        ActiveBackend.Gpu => gpuOverlay?.SourceWindows ?? Array.Empty<nint>(),
+        ActiveBackend.Cpu when activeSourceWindow != nint.Zero =>
+            new[] { activeSourceWindow },
+        _ => Array.Empty<nint>(),
+    };
+
     internal int BackgroundPromotionCount => activeBackend switch
     {
         ActiveBackend.Gpu => gpuOverlay?.BackgroundPromotionCount ?? 0,
@@ -210,6 +230,7 @@ internal sealed class AdaptivePortalOverlay : IDisposable
             case ActiveBackend.Gpu when gpuOverlay is not null:
                 if (gpuOverlay.TryUpdate(screenCenter, out error))
                 {
+                    activeSourceWindow = gpuOverlay.SourceWindow;
                     return true;
                 }
 

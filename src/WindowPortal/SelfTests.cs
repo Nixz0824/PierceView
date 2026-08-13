@@ -129,6 +129,16 @@ internal static class SelfTests
                    initial.SequenceEqual(new nint[] { 1, 2, 3, 4 });
         }, failures, ref total);
 
+        Check("失效来源补位保留已提升顺序", () =>
+        {
+            var current = new nint[] { 3, 1, 2, 4 };
+            var reconciled = MultilayerWindowResolver.ReconcileInvalidSources(
+                current,
+                new HashSet<nint> { 2 },
+                new nint[] { 3, 1, 5, 6, 4 });
+            return reconciled.SequenceEqual(new nint[] { 3, 1, 4, 5 });
+        }, failures, ref total);
+
         Check("置顶宿主保持普通来源在非置顶窗口带", () =>
         {
             var host = (nint)0x1234;

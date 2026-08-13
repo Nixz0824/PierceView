@@ -6,6 +6,21 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 ## [Unreleased]
 
+### 2.3.0-multilayer-alpha.6 (local experimental build)
+
+- F8 会话不再把启动时识别到的后台应用固定为一次性快照：每 75 ms 检查当前来源是否仍然有效，关闭或最小化任意已捕获窗口后，从更深层候选中自动补齐，仍严格限制为最多 `-1` 至 `-4`。
+- Stop treating the background applications detected at F8 startup as a one-time snapshot. Every 75 ms, validate the current sources and automatically backfill from deeper candidates after a captured window closes or minimizes, while retaining the strict `-1` through `-4` limit.
+- 仍有效的 WGC 会话和 D3D11 常驻纹理原样复用，只为新补位窗口创建捕获；新来源首帧到达前继续保留上一张完整合成画面，DirectComposition 显示 HWND 不重建、不移动。
+- Reuse every still-valid WGC session and persistent D3D11 texture, creating capture only for a replacement window. Keep the last complete composition until the replacement's first frame arrives, without rebuilding or moving the DirectComposition display HWND.
+- 补位扫描会先排除仍在复用的来源，再继续向后查找空缺，避免四层候选上限被现有窗口重复占满；这只扩大候选查找，不改变最多捕获四层的产品限制。
+- Exclude reused sources while scanning farther back for vacancies so the four-candidate cap cannot be consumed by windows already captured. This only extends candidate discovery and does not change the product's four-capture limit.
+- 动态来源名单与 `WS_EX_NOACTIVATE`、前台层级守卫及真实输入 `-1` 同步更新；移除来源立即恢复原样式，新来源会话结束时也完整恢复。协调器只处理失效来源，不会覆盖用户通过深层点击形成的有效后台顺序。
+- Synchronize dynamic source membership with `WS_EX_NOACTIVATE`, foreground/Z-order protection, and the real input `-1`. Removed sources immediately restore their style and replacements restore on session exit. Reconciliation acts only on invalid sources, preserving a valid order created by deep-window promotion.
+- 关闭捕获来源导致 Windows 尝试把焦点回退给其他应用时，在来源补位和真实 `-1` 同步完成后恢复当前 F8 宿主前台，不让第三方窗口意外跳出。
+- If closing a captured source makes Windows fall back to another application, restore the active F8 host after source backfill and physical `-1` synchronization so an unrelated window cannot unexpectedly take foreground.
+- 新增五层关闭补位自动化探针：验证原 `-5` 自动成为新 `-4`、过渡期间无异常合成帧、显示层始终只有一个、最终来源仍为四个、宿主前台不变化，以及新增来源样式可恢复。
+- Add a five-window close-and-backfill probe covering promotion of the old `-5` to the new `-4`, zero invalid transition composites, one fixed display surface, four final sources, unchanged foreground ownership, and restorable styles for the replacement.
+
 ### 2.3.0-multilayer-alpha.5 (local experimental build)
 
 - 修复深层窗口在视觉上成为新 `-1` 后，点击、滚轮和拖放仍可能落到旧 `-1`：守卫现在持续核对所有已捕获来源的真实 Windows Z-order，并在后台应用自行重排后把所选来源无激活地恢复为真实 `-1`；GPU 合成顺序只有在物理提升成功后才同步。

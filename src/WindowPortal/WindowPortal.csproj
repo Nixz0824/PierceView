@@ -13,7 +13,7 @@
     <Version>2.3.0</Version>
     <AssemblyVersion>2.3.0.0</AssemblyVersion>
     <FileVersion>2.3.0.0</FileVersion>
-    <InformationalVersion>2.3.0-multilayer-alpha.5</InformationalVersion>
+    <InformationalVersion>2.3.0-multilayer-alpha.6</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>寸镜 / PierceView</Product>
     <Company>PierceView Project</Company>

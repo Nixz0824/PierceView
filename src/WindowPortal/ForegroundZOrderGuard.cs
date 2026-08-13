@@ -32,6 +32,7 @@ internal sealed class ForegroundZOrderGuard : IDisposable
     private bool _restoringForeground;
     private nint _pendingForegroundWindow;
     private int _recoveryQueued;
+    private int _forceProtectedForegroundDuringRecovery;
 
     internal ForegroundZOrderGuard()
     {
@@ -254,6 +255,117 @@ internal sealed class ForegroundZOrderGuard : IDisposable
         return true;
     }
 
+    internal bool TryUpdateSources(
+        IReadOnlyList<nint> sourceWindows,
+        out string? error)
+    {
+        var distinctSources = sourceWindows
+            .Where(window => window != nint.Zero)
+            .Distinct()
+            .ToArray();
+        if (distinctSources.Length == 0 ||
+            distinctSources.Any(window => !NativeMethods.IsWindow(window)))
+        {
+            error = "无法更新多层窗口守卫：新的来源窗口集合不可用。";
+            return false;
+        }
+
+        lock (_recoveryGate)
+        {
+            if (_eventHook == nint.Zero ||
+                !NativeMethods.IsWindow(_protectedWindow))
+            {
+                error = "多层窗口守卫尚未启用。";
+                return false;
+            }
+
+            var previousSources = _sourceWindows;
+            var addedSources = new List<nint>();
+            var processIds = new List<uint>(distinctSources.Length);
+            foreach (var source in distinctSources)
+            {
+                if (!_interactionGuard.Contains(source))
+                {
+                    if (!_interactionGuard.TryAdd(source, out error))
+                    {
+                        foreach (var addedSource in addedSources)
+                        {
+                            _interactionGuard.TryRemove(addedSource);
+                        }
+
+                        return false;
+                    }
+
+                    addedSources.Add(source);
+                }
+
+                NativeMethods.GetWindowThreadProcessId(source, out var processId);
+                if (processId == 0)
+                {
+                    foreach (var addedSource in addedSources)
+                    {
+                        _interactionGuard.TryRemove(addedSource);
+                    }
+
+                    error = "无法识别新透视来源窗口的进程。";
+                    return false;
+                }
+
+                processIds.Add(processId);
+            }
+
+            foreach (var previousSource in previousSources)
+            {
+                if (!distinctSources.Contains(previousSource))
+                {
+                    _interactionGuard.TryRemove(previousSource);
+                }
+            }
+
+            _sourceWindows = distinctSources;
+            _sourceProcessIds = processIds.Distinct().ToArray();
+            // Reconciliation follows the current physical Z-order. This also
+            // selects the new real -1 when the previously selected window was
+            // closed, without leaving input aimed at an older list entry.
+            _sourceWindow = _sourceWindows[0];
+
+            if (!IsSelectedSourceFrontmostCore())
+            {
+                MoveBehindProtectedWindow(_sourceWindow);
+            }
+        }
+
+        error = null;
+        return true;
+    }
+
+    internal void RestoreProtectedForegroundAfterSourceRemoval()
+    {
+        // Window destruction can publish its automatic foreground fallback a
+        // few milliseconds after source reconciliation. Recover immediately,
+        // then keep the existing short follow-up worker watching that burst.
+        TryRestoreProtectedForegroundAfterSourceRemoval();
+        Volatile.Write(ref _forceProtectedForegroundDuringRecovery, 1);
+        QueueProtectedPositionRecovery(_sourceWindow);
+    }
+
+    private void TryRestoreProtectedForegroundAfterSourceRemoval()
+    {
+        lock (_recoveryGate)
+        {
+            if (_eventHook == nint.Zero ||
+                !NativeMethods.IsWindow(_protectedWindow) ||
+                NativeMethods.GetForegroundWindow() == _protectedWindow)
+            {
+                return;
+            }
+
+            ForceProtectedWindowForeground();
+            MoveBehindProtectedWindow(_sourceWindow);
+            RecoveryCount++;
+        }
+    }
+
     internal void UpdatePortalGeometry(NativeMethods.Point center, int radius)
     {
         _ = center;
@@ -305,6 +417,7 @@ internal sealed class ForegroundZOrderGuard : IDisposable
             _sourceWindows = [];
             _sourceProcessIds = [];
             _pendingForegroundWindow = nint.Zero;
+            _forceProtectedForegroundDuringRecovery = 0;
             _restoringForeground = false;
         }
     }
@@ -401,6 +514,16 @@ internal sealed class ForegroundZOrderGuard : IDisposable
                         ref _pendingForegroundWindow,
                         nint.Zero);
                     var foreground = NativeMethods.GetForegroundWindow();
+                    if (Volatile.Read(
+                            ref _forceProtectedForegroundDuringRecovery) != 0 &&
+                        foreground != _protectedWindow)
+                    {
+                        ForceProtectedWindowForeground();
+                        MoveBehindProtectedWindow(_sourceWindow);
+                        RecoveryCount++;
+                        continue;
+                    }
+
                     var foregroundIsSource = BelongsToSourceApplication(foreground);
                     var sourceIsAboveHost = IsSourceApplicationAboveHost();
                     var selectedOrderLost = !IsSelectedSourceFrontmostCore();
@@ -439,6 +562,7 @@ internal sealed class ForegroundZOrderGuard : IDisposable
         finally
         {
             Volatile.Write(ref _recoveryQueued, 0);
+            Volatile.Write(ref _forceProtectedForegroundDuringRecovery, 0);
             var pendingWindow = Volatile.Read(ref _pendingForegroundWindow);
             if (_eventHook != nint.Zero && pendingWindow != nint.Zero)
             {

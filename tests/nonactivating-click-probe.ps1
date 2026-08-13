@@ -166,7 +166,12 @@ if (-not [WindowPortalProbeNative]::IsWindow($chatGpt)) {
 
 $targetPath = Join-Path $workspace 'tests\WindowPortal.TestTarget\bin\Release\net8.0-windows\WindowPortal.TestTarget.exe'
 $portalPath = if ([string]::IsNullOrWhiteSpace($PortalExecutable)) {
-    Join-Path $workspace 'src\WindowPortal\bin\Release\net8.0-windows\PierceView.exe'
+    $project = Join-Path $workspace 'src\WindowPortal\WindowPortal.csproj'
+    $targetFramework = [string](dotnet msbuild $project -nologo -getProperty:TargetFramework)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($targetFramework)) {
+        throw 'Could not resolve the PierceView target framework.'
+    }
+    Join-Path $workspace "src\WindowPortal\bin\Release\$($targetFramework.Trim())\PierceView.exe"
 }
 else {
     $PortalExecutable

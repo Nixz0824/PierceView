@@ -378,7 +378,38 @@ internal static class Program
 
             if (result == 0)
             {
-                Thread.Sleep(durationMilliseconds);
+                var keepAliveDeadline = Stopwatch.GetTimestamp() +
+                    (long)(durationMilliseconds / 1000d * Stopwatch.Frequency);
+                while (!movePortal &&
+                       Stopwatch.GetTimestamp() < keepAliveDeadline)
+                {
+                    if (!visualOverlay.TryUpdate(center, out var updateError))
+                    {
+                        Console.Error.WriteLine(
+                            "动态来源保持刷新失败：" + updateError);
+                        result = 6;
+                        break;
+                    }
+
+                    var committedCenter = visualOverlay.LastPresentedCenter ?? center;
+                    if (!controller.Update(
+                            committedCenter,
+                            out var keepAliveRegionError))
+                    {
+                        Console.Error.WriteLine(
+                            "动态来源交互孔刷新失败：" + keepAliveRegionError);
+                        result = 3;
+                        break;
+                    }
+
+                    Thread.Sleep(8);
+                }
+
+                if (movePortal)
+                {
+                    Thread.Sleep(durationMilliseconds);
+                }
+
                 Console.WriteLine($"前台焦点守卫：回滚次数={visualOverlay.ForegroundRecoveryCount}。");
                 Console.WriteLine(
                     $"前台快速钳制：次数={visualOverlay.ImmediateForegroundClampCount}。");
@@ -392,6 +423,15 @@ internal static class Program
                     Console.WriteLine(
                         $"物理后台顺序恢复：次数={visualOverlay.PhysicalOrderRecoveryCount}。");
                 }
+
+                Console.WriteLine(
+                    $"动态来源协调：次数={visualOverlay.SourceReconciliationCount}，" +
+                    $"新建捕获={visualOverlay.SourceReplacementCount}，" +
+                    $"显示定位={visualOverlay.VisualPlacementCount}，" +
+                    "最终来源=" + string.Join(
+                        ',',
+                        visualOverlay.SourceWindows.Select(
+                            source => $"0x{source:X}")) + "。");
             }
         }
         finally

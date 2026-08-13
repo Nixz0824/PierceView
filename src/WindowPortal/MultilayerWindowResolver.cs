@@ -8,8 +8,9 @@ internal readonly record struct MultilayerWindowSource(
 
 /// <summary>
 /// Resolves the first four capturable top-level windows behind the protected
-/// host. The returned order is front-to-back and remains fixed for one F8
-/// session; normal pointer movement only changes the crop position.
+/// host. The returned order is front-to-back. GPU sessions periodically
+/// resolve it again so closed or newly eligible windows can be removed or
+/// backfilled without rebuilding captures that are still valid.
 /// </summary>
 internal static class MultilayerWindowResolver
 {
@@ -17,10 +18,22 @@ internal static class MultilayerWindowResolver
 
     internal static IReadOnlyList<MultilayerWindowSource> Resolve(
         nint protectedWindow,
-        NativeMethods.Rect portalBounds)
+        NativeMethods.Rect portalBounds,
+        IReadOnlySet<nint>? excludedWindows = null)
     {
-        if (protectedWindow == nint.Zero ||
-            !NativeMethods.IsWindow(protectedWindow) ||
+        return ResolveAfterWindow(
+            protectedWindow,
+            portalBounds,
+            excludedWindows);
+    }
+
+    internal static IReadOnlyList<MultilayerWindowSource> ResolveAfterWindow(
+        nint frontWindow,
+        NativeMethods.Rect portalBounds,
+        IReadOnlySet<nint>? excludedWindows = null)
+    {
+        if (frontWindow == nint.Zero ||
+            !NativeMethods.IsWindow(frontWindow) ||
             portalBounds.Width <= 0 ||
             portalBounds.Height <= 0)
         {
@@ -29,11 +42,16 @@ internal static class MultilayerWindowResolver
 
         var candidates = new List<WindowCandidate>();
         for (var window = NativeMethods.GetWindow(
-                 protectedWindow,
+                 frontWindow,
                  NativeMethods.GwHwndNext);
              window != nint.Zero && candidates.Count < MaximumLayerCount;
              window = NativeMethods.GetWindow(window, NativeMethods.GwHwndNext))
         {
+            if (excludedWindows?.Contains(window) == true)
+            {
+                continue;
+            }
+
             if (!TryCreateCandidate(window, out var candidate) ||
                 !Intersects(candidate.Bounds, portalBounds))
             {
@@ -108,6 +126,75 @@ internal static class MultilayerWindowResolver
         reordered.RemoveAt(selectedIndex);
         reordered.Insert(0, selected);
         return reordered;
+    }
+
+    internal static IReadOnlyList<nint> ReconcileInvalidSources(
+        IReadOnlyList<nint> currentFrontToBack,
+        IReadOnlySet<nint> invalidCurrentSources,
+        IEnumerable<nint> resolvedFrontToBack,
+        int maximumLayerCount = MaximumLayerCount)
+    {
+        var limit = Math.Min(
+            Math.Max(maximumLayerCount, 0),
+            MaximumLayerCount);
+        if (limit == 0)
+        {
+            return Array.Empty<nint>();
+        }
+
+        var reconciled = new List<nint>(limit);
+        foreach (var current in currentFrontToBack)
+        {
+            if (current != nint.Zero &&
+                !invalidCurrentSources.Contains(current) &&
+                !reconciled.Contains(current))
+            {
+                reconciled.Add(current);
+                if (reconciled.Count == limit)
+                {
+                    return reconciled;
+                }
+            }
+        }
+
+        foreach (var resolved in resolvedFrontToBack)
+        {
+            if (resolved != nint.Zero && !reconciled.Contains(resolved))
+            {
+                reconciled.Add(resolved);
+                if (reconciled.Count == limit)
+                {
+                    break;
+                }
+            }
+        }
+
+        return reconciled;
+    }
+
+    internal static bool IsEligibleSessionSource(nint window)
+    {
+        if (window == nint.Zero ||
+            !NativeMethods.IsWindow(window) ||
+            !NativeMethods.IsWindowVisible(window) ||
+            NativeMethods.IsIconic(window) ||
+            NativeMethods.GetAncestor(window, NativeMethods.GaRoot) != window)
+        {
+            return false;
+        }
+
+        NativeMethods.GetWindowThreadProcessId(window, out var processId);
+        if (processId == 0 || processId == Environment.ProcessId)
+        {
+            return false;
+        }
+
+        var cloakResult = NativeMethods.DwmGetWindowAttribute(
+            window,
+            NativeMethods.DwmwaCloaked,
+            out int cloakValue,
+            Marshal.SizeOf<int>());
+        return cloakResult != 0 || cloakValue == 0;
     }
 
     private static bool TryCreateCandidate(

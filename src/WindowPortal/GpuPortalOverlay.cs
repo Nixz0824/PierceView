@@ -22,6 +22,7 @@ internal sealed class GpuPortalOverlay : IDisposable
 {
     private const int MaximumCanvasDimension = 16_384;
     private const int OrderSwitchMaximumHoldMilliseconds = 8;
+    private const int SourceReconciliationMilliseconds = 75;
 
     private const string ShaderSource = """
         cbuffer PortalParameters : register(b0)
@@ -168,7 +169,11 @@ internal sealed class GpuPortalOverlay : IDisposable
     private nint pendingOrderSourceWindow;
     private long pendingOrderSourceFrameSerial;
     private long pendingOrderDeadlineTimestamp;
+    private long nextSourceReconciliationTimestamp;
     private int displayPlacementCount;
+    private int sourceReconciliationCount;
+    private int sourceReplacementCount;
+    private nint protectedWindow;
     private volatile bool active;
     private bool windowShown;
     private bool disposed;
@@ -334,6 +339,23 @@ internal sealed class GpuPortalOverlay : IDisposable
 
     internal int DisplayPlacementCount => Volatile.Read(ref displayPlacementCount);
 
+    internal int SourceReconciliationCount =>
+        Volatile.Read(ref sourceReconciliationCount);
+
+    internal int SourceReplacementCount =>
+        Volatile.Read(ref sourceReplacementCount);
+
+    internal IReadOnlyList<nint> SourceWindows
+    {
+        get
+        {
+            lock (gpuLock)
+            {
+                return captureSources.Select(source => source.Window).ToArray();
+            }
+        }
+    }
+
     internal NativeMethods.Rect DisplayBounds => canvasBounds;
 
     internal bool HasInputPassThrough => form.HasInputPassThrough;
@@ -421,6 +443,7 @@ internal sealed class GpuPortalOverlay : IDisposable
             }
 
             SourceWindow = sources[0].Handle;
+            this.protectedWindow = protectedWindow;
             active = true;
             lastPresentedCenter = null;
             lastPresentedSourceBounds = null;
@@ -434,6 +457,11 @@ internal sealed class GpuPortalOverlay : IDisposable
             pendingOrderSourceFrameSerial = 0;
             pendingOrderDeadlineTimestamp = 0;
             displayPlacementCount = 0;
+            sourceReconciliationCount = 0;
+            sourceReplacementCount = 0;
+            nextSourceReconciliationTimestamp = Stopwatch.GetTimestamp() +
+                (long)(Stopwatch.Frequency *
+                       (SourceReconciliationMilliseconds / 1000d));
             captureFailure = null;
             foreach (var source in captureSources)
             {
@@ -463,6 +491,11 @@ internal sealed class GpuPortalOverlay : IDisposable
         if (!active || SourceWindow == nint.Zero)
         {
             error = "GPU 透视视觉源尚未启动。";
+            return false;
+        }
+
+        if (!TryReconcileSources(screenCenter, out error))
+        {
             return false;
         }
 
@@ -496,8 +529,11 @@ internal sealed class GpuPortalOverlay : IDisposable
                         source.Window,
                         out sourceBounds[index]))
                 {
-                    error = $"无法读取第 {index + 1} 层 GPU 捕获窗口的位置。";
-                    return false;
+                    // A source can disappear between reconciliation passes.
+                    // Keep the last complete swap-chain frame until the next
+                    // pass removes it and backfills a deeper eligible window.
+                    error = null;
+                    return true;
                 }
             }
 
@@ -662,6 +698,7 @@ internal sealed class GpuPortalOverlay : IDisposable
         active = false;
         _ = foregroundHeartbeat.Change(Timeout.Infinite, Timeout.Infinite);
         SourceWindow = nint.Zero;
+        protectedWindow = nint.Zero;
         if (windowShown && form.IsHandleCreated)
         {
             _ = NativeMethods.SetWindowPos(
@@ -709,6 +746,9 @@ internal sealed class GpuPortalOverlay : IDisposable
             pendingOrderSourceFrameSerial = 0;
             pendingOrderDeadlineTimestamp = 0;
             displayPlacementCount = 0;
+            sourceReconciliationCount = 0;
+            sourceReplacementCount = 0;
+            nextSourceReconciliationTimestamp = 0;
             captureFailure = null;
         }
     }
@@ -822,9 +862,20 @@ internal sealed class GpuPortalOverlay : IDisposable
         }
         catch (Exception exception)
         {
-            Volatile.Write(
-                ref captureFailure,
-                $"GPU 捕获帧处理失败：{exception.Message}");
+            lock (gpuLock)
+            {
+                // A removed source can already have queued one last callback.
+                // Disposing that source may make TryGetNextFrame throw, but it
+                // is an expected reconciliation race rather than a live GPU
+                // session failure. Report only failures from a still-current
+                // frame pool.
+                if (active && captureSourceByPool.ContainsKey(sender))
+                {
+                    Volatile.Write(
+                        ref captureFailure,
+                        $"GPU 捕获帧处理失败：{exception.Message}");
+                }
+            }
         }
     }
 
@@ -948,6 +999,245 @@ internal sealed class GpuPortalOverlay : IDisposable
             Texture = null;
             Session.Dispose();
             FramePool.Dispose();
+        }
+    }
+
+    private bool TryReconcileSources(
+        NativeMethods.Point screenCenter,
+        out string? error)
+    {
+        var now = Stopwatch.GetTimestamp();
+        if (now < Volatile.Read(ref nextSourceReconciliationTimestamp))
+        {
+            error = null;
+            return true;
+        }
+
+        Volatile.Write(
+            ref nextSourceReconciliationTimestamp,
+            now + (long)(Stopwatch.Frequency *
+                         (SourceReconciliationMilliseconds / 1000d)));
+        var sessionProtectedWindow = protectedWindow;
+        if (sessionProtectedWindow == nint.Zero ||
+            !NativeMethods.IsWindow(sessionProtectedWindow))
+        {
+            error = "F8 会话的宿主窗口已经不可用。";
+            return false;
+        }
+
+        CaptureSource[] currentSources;
+        lock (gpuLock)
+        {
+            if (!active)
+            {
+                error = "GPU 透视视觉源尚未启动。";
+                return false;
+            }
+
+            currentSources = captureSources.ToArray();
+        }
+
+        var invalidCurrentSources = currentSources
+            .Where(source =>
+                !MultilayerWindowResolver.IsEligibleSessionSource(
+                    source.Window))
+            .Select(source => source.Window)
+            .ToHashSet();
+        if (invalidCurrentSources.Count == 0)
+        {
+            // Physical promotion deliberately changes the captured Z-order.
+            // Do not interpret that valid reordering (or normal app-owned
+            // reorder events) as a new source set. Reconcile only when an
+            // existing capture actually closes, minimizes, or becomes invalid.
+            error = null;
+            return true;
+        }
+
+        var validCurrentHandles = currentSources
+            .Select(source => source.Window)
+            .Where(window => !invalidCurrentSources.Contains(window))
+            .ToHashSet();
+        var deepestValidWindow = currentSources
+            .Select(source => source.Window)
+            .LastOrDefault(validCurrentHandles.Contains);
+        var resolvedSources = deepestValidWindow == nint.Zero
+            ? MultilayerWindowResolver.Resolve(
+                sessionProtectedWindow,
+                geometry.CreateFrameBounds(screenCenter),
+                validCurrentHandles)
+            : MultilayerWindowResolver.ResolveAfterWindow(
+                deepestValidWindow,
+                geometry.CreateFrameBounds(screenCenter),
+                validCurrentHandles);
+        if (resolvedSources.Count <
+            MultilayerWindowResolver.MaximumLayerCount -
+            validCurrentHandles.Count)
+        {
+            var excludedWithDeeperCandidates = validCurrentHandles
+                .Concat(resolvedSources.Select(source => source.Handle))
+                .ToHashSet();
+            resolvedSources = resolvedSources
+                .Concat(MultilayerWindowResolver.Resolve(
+                    sessionProtectedWindow,
+                    geometry.CreateFrameBounds(screenCenter),
+                    excludedWithDeeperCandidates))
+                .Take(MultilayerWindowResolver.MaximumLayerCount)
+                .ToArray();
+        }
+        var currentHandles = currentSources
+            .Select(source => source.Window)
+            .ToArray();
+        var resolvedHandles = MultilayerWindowResolver.ReconcileInvalidSources(
+                currentHandles,
+                invalidCurrentSources,
+                resolvedSources.Select(source => source.Handle))
+            .ToArray();
+        if (resolvedHandles.Length == 0)
+        {
+            // There is no safe replacement yet. The last complete composition
+            // remains visible and a later pass can recover if a window appears.
+            error = null;
+            return true;
+        }
+
+        if (currentSources.Select(source => source.Window)
+            .SequenceEqual(resolvedHandles))
+        {
+            error = null;
+            return true;
+        }
+
+        var existingByWindow = currentSources.ToDictionary(
+            source => source.Window);
+        var addedSources = new List<CaptureSource>();
+        var sourcesCommitted = false;
+        try
+        {
+            foreach (var resolvedHandle in resolvedHandles)
+            {
+                if (existingByWindow.ContainsKey(resolvedHandle))
+                {
+                    continue;
+                }
+
+                var captureSource = CaptureSource.Create(
+                    resolvedHandle,
+                    resources.CaptureDevice);
+                captureSource.FramePool.FrameArrived += OnFrameArrived;
+                addedSources.Add(captureSource);
+            }
+
+            lock (gpuLock)
+            {
+                foreach (var addedSource in addedSources)
+                {
+                    captureSourceByPool.Add(
+                        addedSource.FramePool,
+                        addedSource);
+                }
+            }
+
+            foreach (var addedSource in addedSources)
+            {
+                addedSource.Session.StartCapture();
+            }
+
+            if (!foregroundGuard.TryUpdateSources(resolvedHandles, out error))
+            {
+                RemovePendingSources(addedSources);
+                return false;
+            }
+
+            CaptureSource[] removedSources;
+            lock (gpuLock)
+            {
+                if (!active)
+                {
+                    RemovePendingSourcesLocked(addedSources);
+                    error = "GPU 透视会话在更新来源时已经结束。";
+                    return false;
+                }
+
+                var addedByWindow = addedSources.ToDictionary(
+                    source => source.Window);
+                var nextSources = resolvedHandles
+                    .Select(window => existingByWindow.TryGetValue(
+                            window,
+                            out var existingSource)
+                        ? existingSource
+                        : addedByWindow[window])
+                    .ToArray();
+                removedSources = currentSources
+                    .Where(source => !resolvedHandles.Contains(source.Window))
+                    .ToArray();
+                foreach (var removedSource in removedSources)
+                {
+                    captureSourceByPool.Remove(removedSource.FramePool);
+                }
+
+                captureSources.Clear();
+                captureSources.AddRange(nextSources);
+                sourcesCommitted = true;
+                SourceWindow = resolvedHandles[0];
+                compositionOrderSerial++;
+                pendingOrderCaptureSerial = 0;
+                pendingOrderSourceWindow = nint.Zero;
+                pendingOrderSourceFrameSerial = 0;
+                pendingOrderDeadlineTimestamp = 0;
+                Interlocked.Increment(ref sourceReconciliationCount);
+                Interlocked.Add(
+                    ref sourceReplacementCount,
+                    addedSources.Count);
+            }
+
+            foreach (var removedSource in removedSources)
+            {
+                removedSource.FramePool.FrameArrived -= OnFrameArrived;
+                removedSource.Dispose();
+            }
+
+            if (removedSources.Length > 0)
+            {
+                // Closing a non-activating source can make Windows choose an
+                // unrelated fallback foreground window. Re-assert the F8 host
+                // after the source set and its physical -1 are synchronized.
+                foregroundGuard.RestoreProtectedForegroundAfterSourceRemoval();
+            }
+
+            error = null;
+            return true;
+        }
+        catch (Exception exception)
+        {
+            if (!sourcesCommitted)
+            {
+                RemovePendingSources(addedSources);
+            }
+            error = $"GPU 动态来源补位失败：{exception.Message}";
+            return false;
+        }
+    }
+
+    private void RemovePendingSources(IReadOnlyList<CaptureSource> sources)
+    {
+        lock (gpuLock)
+        {
+            RemovePendingSourcesLocked(sources);
+        }
+
+        foreach (var source in sources)
+        {
+            source.FramePool.FrameArrived -= OnFrameArrived;
+            source.Dispose();
+        }
+    }
+
+    private void RemovePendingSourcesLocked(
+        IReadOnlyList<CaptureSource> sources)
+    {
+        foreach (var source in sources)
+        {
+            captureSourceByPool.Remove(source.FramePool);
         }
     }
 
