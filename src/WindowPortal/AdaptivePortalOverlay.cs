@@ -45,6 +45,13 @@ internal sealed class AdaptivePortalOverlay : IDisposable
         _ => nint.Zero,
     };
 
+    internal NativeMethods.Point? LastPresentedCenter => activeBackend switch
+    {
+        ActiveBackend.Gpu => gpuOverlay?.LastPresentedCenter,
+        ActiveBackend.Cpu => cpuOverlay.LastPresentedCenter,
+        _ => null,
+    };
+
     internal bool TryShow(
         nint sourceWindow,
         nint protectedWindow,

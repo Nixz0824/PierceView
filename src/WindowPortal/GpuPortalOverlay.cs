@@ -198,6 +198,8 @@ internal sealed class GpuPortalOverlay : IDisposable
 
     internal long PresentedFrames => Interlocked.Read(ref presentedFrames);
 
+    internal NativeMethods.Point? LastPresentedCenter => lastPresentedCenter;
+
     internal bool TryShow(
         nint sourceWindow,
         nint protectedWindow,
