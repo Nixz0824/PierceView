@@ -149,6 +149,7 @@ internal sealed class GpuPortalOverlay : IDisposable
     private readonly IDCompositionTarget compositionTarget;
     private readonly IDCompositionVisual compositionVisual;
     private readonly ForegroundZOrderGuard foregroundGuard = new();
+    private readonly WindowOwnerGuard ownerGuard = new();
     private readonly System.Threading.Timer foregroundHeartbeat;
 
     private readonly List<CaptureSource> captureSources = [];
@@ -360,6 +361,11 @@ internal sealed class GpuPortalOverlay : IDisposable
             return false;
         }
 
+        if (!ownerGuard.TryEnable(form.Handle, protectedWindow, out error))
+        {
+            return false;
+        }
+
         if (!foregroundGuard.TryEnable(
                 sources.Select(source => source.Handle).ToArray(),
                 protectedWindow,
@@ -367,6 +373,7 @@ internal sealed class GpuPortalOverlay : IDisposable
                 geometry.GuardRadius,
                 out error))
         {
+            ownerGuard.Restore();
             return false;
         }
 
@@ -586,7 +593,6 @@ internal sealed class GpuPortalOverlay : IDisposable
         active = false;
         _ = foregroundHeartbeat.Change(Timeout.Infinite, Timeout.Infinite);
         SourceWindow = nint.Zero;
-        foregroundGuard.Restore();
         if (windowShown && form.IsHandleCreated)
         {
             _ = NativeMethods.SetWindowPos(
@@ -604,6 +610,8 @@ internal sealed class GpuPortalOverlay : IDisposable
         }
 
         windowShown = false;
+        foregroundGuard.Restore();
+        ownerGuard.Restore();
         CaptureSource[] oldSources;
         lock (gpuLock)
         {
@@ -640,6 +648,7 @@ internal sealed class GpuPortalOverlay : IDisposable
         Hide();
         disposed = true;
         foregroundHeartbeat.Dispose();
+        ownerGuard.Dispose();
         parameterBuffer.Dispose();
         sampler.Dispose();
         pixelShader.Dispose();

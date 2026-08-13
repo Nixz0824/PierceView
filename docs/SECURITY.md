@@ -24,6 +24,7 @@ Include the affected version and SHA256, Windows version, minimal conditions, po
 - DWM thumbnail + `PrintWindow`/`BitBlt`：GPU 路径不可用或失败时使用的 CPU 回退。
 - `SetWindowLongPtr(WS_EX_NOACTIVATE)`：临时避免来源窗口因鼠标操作激活。
 - `SetWindowPos`、`SetForegroundWindow`、WinEvent：当来源争夺前台时恢复宿主顺序。
+- `SetWindowPos(HWND_TOPMOST/HWND_NOTOPMOST)`：仅在 F8 会话内建立宿主视觉屏障，结束时恢复宿主原始置顶状态；不会保存为系统设置。
 - `%LOCALAPPDATA%\PierceView\settings.json`：仅保存透视形状、尺寸、羽化和语言等本地设置。
 
 应用清单固定为 `asInvoker`、`uiAccess=false`，不会自动请求管理员权限。

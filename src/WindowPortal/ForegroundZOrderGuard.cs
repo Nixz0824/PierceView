@@ -24,6 +24,8 @@ internal sealed class ForegroundZOrderGuard : IDisposable
     private nint _eventHook;
     private nint _reorderEventHook;
     private nint _protectedWindow;
+    private bool _protectedWindowWasTopmost;
+    private bool _protectedTopmostApplied;
     private nint _sourceWindow;
     private nint[] _sourceWindows = [];
     private uint[] _sourceProcessIds = [];
@@ -104,6 +106,7 @@ internal sealed class ForegroundZOrderGuard : IDisposable
         }
 
         _protectedWindow = protectedWindow;
+        _protectedWindowWasTopmost = IsTopmost(protectedWindow);
         _sourceWindows = distinctSources;
         _sourceProcessIds = processIds.Distinct().ToArray();
         _sourceWindow = distinctSources[0];
@@ -139,6 +142,31 @@ internal sealed class ForegroundZOrderGuard : IDisposable
             return false;
         }
 
+        if (!_protectedWindowWasTopmost)
+        {
+            if (!NativeMethods.SetWindowPos(
+                    protectedWindow,
+                    NativeMethods.HwndTopMost,
+                    0,
+                    0,
+                    0,
+                    0,
+                    NativeMethods.SwpNoMove |
+                    NativeMethods.SwpNoSize |
+                    NativeMethods.SwpNoActivate |
+                    NativeMethods.SwpNoOwnerZOrder))
+            {
+                var topmostError = Marshal.GetLastPInvokeError();
+                error = Win32Error(
+                    "无法为本次 F8 会话建立宿主置顶屏障",
+                    topmostError);
+                Restore();
+                return false;
+            }
+
+            _protectedTopmostApplied = true;
+        }
+
         error = null;
         return true;
     }
@@ -165,12 +193,13 @@ internal sealed class ForegroundZOrderGuard : IDisposable
                 return false;
             }
 
+            var sourceChanged = _sourceWindow != root;
             _sourceWindow = root;
-            if (GetFirstVisibleWindowBehindHost() != root)
+            if (sourceChanged)
             {
                 if (!NativeMethods.SetWindowPos(
                         root,
-                        _protectedWindow,
+                        GetSourceInsertAfter(root),
                         0,
                         0,
                         0,
@@ -240,7 +269,10 @@ internal sealed class ForegroundZOrderGuard : IDisposable
         lock (_recoveryGate)
         {
             _interactionGuard.Restore();
+            RestoreProtectedTopmost();
             _protectedWindow = nint.Zero;
+            _protectedWindowWasTopmost = false;
+            _protectedTopmostApplied = false;
             _sourceWindow = nint.Zero;
             _sourceWindows = [];
             _sourceProcessIds = [];
@@ -451,7 +483,7 @@ internal sealed class ForegroundZOrderGuard : IDisposable
 
         _ = NativeMethods.SetWindowPos(
             window,
-            _protectedWindow,
+            GetSourceInsertAfter(window),
             0,
             0,
             0,
@@ -544,21 +576,49 @@ internal sealed class ForegroundZOrderGuard : IDisposable
         return processId != 0 && _sourceProcessIds.Contains(processId);
     }
 
-    private nint GetFirstVisibleWindowBehindHost()
+    private void RestoreProtectedTopmost()
     {
-        for (var window = NativeMethods.GetWindow(
-                 _protectedWindow,
-                 NativeMethods.GwHwndNext);
-             window != nint.Zero;
-             window = NativeMethods.GetWindow(window, NativeMethods.GwHwndNext))
+        if (!_protectedTopmostApplied ||
+            _protectedWindowWasTopmost ||
+            !NativeMethods.IsWindow(_protectedWindow))
         {
-            if (NativeMethods.IsWindowVisible(window))
-            {
-                return window;
-            }
+            return;
         }
 
-        return nint.Zero;
+        _ = NativeMethods.SetWindowPos(
+            _protectedWindow,
+            NativeMethods.HwndNoTopMost,
+            0,
+            0,
+            0,
+            0,
+            NativeMethods.SwpNoMove |
+            NativeMethods.SwpNoSize |
+            NativeMethods.SwpNoActivate |
+            NativeMethods.SwpNoOwnerZOrder);
+    }
+
+    private nint GetSourceInsertAfter(nint sourceWindow) =>
+        ChooseSourceInsertAfter(
+            _protectedWindow,
+            _protectedWindowWasTopmost || _protectedTopmostApplied,
+            IsTopmost(sourceWindow));
+
+    internal static nint ChooseSourceInsertAfter(
+        nint protectedWindow,
+        bool protectedIsTopmost,
+        bool sourceIsTopmost) =>
+        protectedIsTopmost && !sourceIsTopmost
+            ? NativeMethods.HwndTop
+            : protectedWindow;
+
+    private static bool IsTopmost(nint window)
+    {
+        Marshal.SetLastPInvokeError(0);
+        var extendedStyle = NativeMethods.GetWindowLongPtr(
+            window,
+            NativeMethods.GwlExStyle);
+        return (extendedStyle.ToInt64() & NativeMethods.WsExTopmost) != 0;
     }
 
     private static string Win32Error(string message, int error) =>

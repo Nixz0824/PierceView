@@ -6,6 +6,13 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 ## [Unreleased]
 
+### 2.3.0-multilayer-alpha.4 (local experimental build)
+
+- 将后台整窗闪现修复从“事件到达后恢复”升级为预防式窗口带隔离：F8 会话期间临时把宿主放入 Windows 置顶窗口带，普通后台来源即使短暂激活也无法在桌面合成器中覆盖宿主。
+- Upgrade whole-window flash protection from post-event recovery to preventive window-band isolation. During an F8 session, temporarily place the host in Windows' topmost band so an ordinary background source cannot cover it even if it briefly activates.
+- 透视显示层临时绑定为宿主的拥有窗口，继续保持在宿主上方且完全鼠标穿透；松开 F8、暂停、失败回退或退出时恢复显示层拥有关系与宿主原始置顶状态，原本已置顶的宿主不会被取消置顶。
+- Temporarily bind the transparent portal surface as an owned window of the host so it stays above the host while remaining input-transparent. Release, pause, fallback, and exit restore both ownership and the host's original topmost state; an already-topmost host remains topmost.
+
 ### 2.3.0-multilayer-alpha.3 (local experimental build)
 
 - 修复点击后台应用或其内容时，来源应用整体界面可能在桌面最前方闪现一两帧：同时监听 WinEvent 前台切换与窗口重排，事件到达后立即把来源窗口钳制回宿主后方，不再固定等待 8 ms 后才首次恢复。

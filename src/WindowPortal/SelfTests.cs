@@ -129,6 +129,23 @@ internal static class SelfTests
                    initial.SequenceEqual(new nint[] { 1, 2, 3, 4 });
         }, failures, ref total);
 
+        Check("置顶宿主保持普通来源在非置顶窗口带", () =>
+        {
+            var host = (nint)0x1234;
+            return ForegroundZOrderGuard.ChooseSourceInsertAfter(
+                       host,
+                       protectedIsTopmost: true,
+                       sourceIsTopmost: false) == NativeMethods.HwndTop &&
+                   ForegroundZOrderGuard.ChooseSourceInsertAfter(
+                       host,
+                       protectedIsTopmost: true,
+                       sourceIsTopmost: true) == host &&
+                   ForegroundZOrderGuard.ChooseSourceInsertAfter(
+                       host,
+                       protectedIsTopmost: false,
+                       sourceIsTopmost: false) == host;
+        }, failures, ref total);
+
         Check(
             "十六进制窗口句柄",
             () => PortalOptions.ParseWindowHandle("0x1234") == 0x1234,

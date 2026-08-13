@@ -1,8 +1,8 @@
 # 寸镜 / PierceView 2.3 多层实验版
 
-`2.3.0-multilayer-alpha.3` 是从公开稳定版 `2.2.0` 独立分支开发的本地测试版本，不替代 `2.2.0 GPU Edition` 或 `2.1.0 CPU Edition`。
+`2.3.0-multilayer-alpha.4` 是从公开稳定版 `2.2.0` 独立分支开发的本地测试版本，不替代 `2.2.0 GPU Edition` 或 `2.1.0 CPU Edition`。
 
-`2.3.0-multilayer-alpha.3` is a local test build developed on a separate branch from the public stable `2.2.0`. It does not replace the `2.2.0 GPU Edition` or `2.1.0 CPU Edition`.
+`2.3.0-multilayer-alpha.4` is a local test build developed on a separate branch from the public stable `2.2.0`. It does not replace the `2.2.0 GPU Edition` or `2.1.0 CPU Edition`.
 
 ## 本轮范围 / Scope
 
@@ -12,6 +12,7 @@
 - 每层使用独立 WGC 会话和常驻 D3D11 纹理，但最终共用一张固定 DirectComposition 显示层，每次更新只提交一次。Each layer has an independent WGC session and persistent D3D11 texture, while all layers share one fixed DirectComposition display surface and one present per update.
 - 点击矩形中可见的深层窗口时，只把它提升到宿主正后方的新 `-1`；宿主继续保持前台，其余后台来源按原相对顺序后移。Clicking a visible deep window promotes it only to the new `-1` slot behind the host; the host remains foreground and other sources shift back without changing their relative order.
 - 前台窗口事件到达时立即把来源钳制回宿主后方，并以 2 ms 间隔短暂复查，避免高刷新率屏幕在后台应用主动激活时看到整窗闪现。Clamp a source behind the host immediately when a foreground event arrives, then recheck briefly at 2 ms intervals to prevent whole-window flashes when background apps activate on high-refresh displays.
+- F8 会话期间为宿主建立可恢复的临时置顶屏障，并把透明透视显示层绑定为宿主拥有窗口；后台来源即使主动激活也不能在合成器中覆盖宿主，松开 F8 后恢复宿主原始置顶状态。Create a restorable temporary topmost barrier for the host during the F8 session and bind the transparent portal surface as an owned window. A background source cannot cover the host even if it activates, and the host's original topmost state is restored on release.
 
 ## 暂未包含 / Not included yet
 

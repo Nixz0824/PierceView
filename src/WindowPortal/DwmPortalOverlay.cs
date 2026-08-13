@@ -41,6 +41,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		private readonly ForegroundZOrderGuard _foregroundGuard = new();
 
+		private readonly WindowOwnerGuard _ownerGuard = new();
+
 		private readonly System.Windows.Forms.Timer _zOrderGuardTimer;
 
 		private bool _portalVisible;
@@ -99,6 +101,15 @@ internal sealed class DwmPortalOverlay : IDisposable
 		{
 			HidePortal();
 			SourceWindow = sourceWindow;
+			_capture = new CaptureSurface(_geometry);
+			_display = new LayeredPortalForm(_geometry);
+			if (_enableForegroundGuard &&
+			    !_ownerGuard.TryEnable(_display.Handle, protectedWindow, out error))
+			{
+				HidePortal();
+				return false;
+			}
+
 			if (_enableForegroundGuard &&
 			    !_foregroundGuard.TryEnable(sourceWindow, protectedWindow, screenCenter, _geometry.GuardRadius, out error))
 			{
@@ -106,8 +117,6 @@ internal sealed class DwmPortalOverlay : IDisposable
 				return false;
 			}
 
-			_capture = new CaptureSurface(_geometry);
-			_display = new LayeredPortalForm(_geometry);
 			if (!_capture.TryRegisterSource(sourceWindow, out error))
 			{
 				HidePortal();
@@ -170,6 +179,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 			_capture?.Dispose();
 			_display?.Dispose();
 			_foregroundGuard.Restore();
+			_ownerGuard.Restore();
 			_capture = null;
 			_display = null;
 			_portalVisible = false;
@@ -186,6 +196,7 @@ internal sealed class DwmPortalOverlay : IDisposable
 			if (disposing)
 			{
 				_zOrderGuardTimer.Dispose();
+				_ownerGuard.Dispose();
 			}
 
 			base.Dispose(disposing);

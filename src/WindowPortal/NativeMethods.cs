@@ -68,8 +68,10 @@ internal static class NativeMethods
 	internal const int GwlStyle = -16;
 
 	internal const int GwlExStyle = -20;
+	internal const int GwlHwndParent = -8;
 	internal const long WsChild = 0x40000000L;
 	internal const long WsExToolWindow = 0x00000080L;
+	internal const long WsExTopmost = 0x00000008L;
 	internal const long WsExNoActivate = 0x08000000L;
 
 	internal const uint DwmwaCloaked = 14u;
@@ -113,6 +115,10 @@ internal static class NativeMethods
 	internal const uint SrcCopy = 0x00CC0020;
 
 	internal static readonly nint HwndTopMost = new IntPtr(-1);
+
+	internal static readonly nint HwndNoTopMost = new IntPtr(-2);
+
+	internal static readonly nint HwndTop = nint.Zero;
 
 	[StructLayout(LayoutKind.Sequential)]
 	internal struct BlendFunction

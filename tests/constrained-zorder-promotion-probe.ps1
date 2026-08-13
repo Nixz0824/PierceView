@@ -249,6 +249,7 @@ try {
     $belowShallowBefore = [ConstrainedZOrderProbeNative]::GetVisibleWindow($shallowWindow, 2)
     $shallowStyleBefore = [ConstrainedZOrderProbeNative]::GetWindowLongPtr($shallowWindow, -20)
     $deepStyleBefore = [ConstrainedZOrderProbeNative]::GetWindowLongPtr($deepWindow, -20)
+    $hostStyleBefore = [ConstrainedZOrderProbeNative]::GetWindowLongPtr($chatGpt, -20)
     if ($foregroundBefore -ne $chatGpt) {
         throw "ChatGPT could not be made foreground before the test."
     }
@@ -288,6 +289,7 @@ try {
     }
 
     $shallowStyleDuring = [ConstrainedZOrderProbeNative]::GetWindowLongPtr($shallowWindow, -20)
+    $hostStyleDuring = [ConstrainedZOrderProbeNative]::GetWindowLongPtr($chatGpt, -20)
     $clickX = $centerX + 120
     $clickY = $centerY
     [ConstrainedZOrderProbeNative]::SetCursorPos($clickX, $clickY) | Out-Null
@@ -345,6 +347,7 @@ try {
 
     $shallowStyleAfter = [ConstrainedZOrderProbeNative]::GetWindowLongPtr($shallowWindow, -20)
     $deepStyleAfter = [ConstrainedZOrderProbeNative]::GetWindowLongPtr($deepWindow, -20)
+    $hostStyleAfter = [ConstrainedZOrderProbeNative]::GetWindowLongPtr($chatGpt, -20)
     $deepClickForwarded = $deepTitle -like '*Clicks: 1*'
     $shallowNotClicked = $shallowTitle -like '*Clicks: 0*'
     $foregroundPreserved = $foregroundAfterClick -eq $chatGpt
@@ -358,6 +361,10 @@ try {
         $shallowStyleAfter -eq $shallowStyleBefore -and
         $deepStyleAfter -eq $deepStyleBefore
     $promotionGuardTriggered = $promotionCount -ge 1
+    $hostWasTopmost = ($hostStyleBefore.ToInt64() -band 0x00000008) -ne 0
+    $hostBarrierApplied = ($hostStyleDuring.ToInt64() -band 0x00000008) -ne 0
+    $hostTopmostRestored =
+        (($hostStyleAfter.ToInt64() -band 0x00000008) -ne 0) -eq $hostWasTopmost
     $returnedShallowDirectlyBelow = $belowChatAfterReturnClick -eq $shallowWindow
     $secondClickForwarded = $shallowTitleAfterReturn -like '*Clicks: 1*'
     $deepNotClickedTwice = $deepTitleAfterReturn -like '*Clicks: 1*'
@@ -382,6 +389,8 @@ try {
     Write-Output "STYLES_RESTORED=$stylesRestored"
     Write-Output "FOREGROUND_RECOVERY_COUNT=$foregroundRecoveryCount"
     Write-Output "IMMEDIATE_FOREGROUND_CLAMP_COUNT=$immediateClampCount"
+    Write-Output "HOST_TOPMOST_BARRIER_APPLIED=$hostBarrierApplied"
+    Write-Output "HOST_TOPMOST_STATE_RESTORED=$hostTopmostRestored"
     Write-Output "PROMOTION_COUNT=$promotionCount"
     Write-Output "RETURNED_SHALLOW_DIRECTLY_BELOW=$returnedShallowDirectlyBelow"
     Write-Output "SECOND_CLICK_FORWARDED=$secondClickForwarded"
@@ -397,6 +406,8 @@ try {
         -not $shallowNoActivateApplied -or
         -not $deepNoActivateApplied -or
         -not $stylesRestored -or
+        -not $hostBarrierApplied -or
+        -not $hostTopmostRestored -or
         -not $promotionGuardTriggered -or
         -not $returnedShallowDirectlyBelow -or
         -not $secondClickForwarded -or
