@@ -6,10 +6,41 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 ## [Unreleased]
 
-### GPU development / GPU 开发
+## [2.2.0] - 2026-08-13
+
+### GPU Edition / GPU 版本
+
+- 将用户验证通过的 `2.2.0-gpu-alpha.2` 晋升为首个正式 GPU 版本；保持轻量、免安装的 Windows 托盘工具形态，并完整保留 2.1.0 CPU 稳定管线作为自动回退。
+- Promote the user-validated `2.2.0-gpu-alpha.2` to the first stable GPU Edition. It remains a lightweight, portable Windows tray utility and retains the complete 2.1.0 CPU pipeline as an automatic fallback.
+
+### Added
+
+- 新增 `Windows.Graphics.Capture → D3D11 常驻纹理 → HLSL 形状/羽化 → DirectComposition` GPU 管线；鼠标移动直接重裁最新显存纹理，不等待新的窗口抓帧。
+- Add a `Windows.Graphics.Capture → persistent D3D11 texture → HLSL shape/feathering → DirectComposition` pipeline. Pointer motion recrops the latest GPU texture without waiting for another window capture.
+- 新增 GPU 能力探针、动态来源冒烟和打包态就绪握手，覆盖首帧提交、来源 HWND、透明命中与 `WS_EX_NOACTIVATE`。
+- Add GPU capability probing, dynamic-source smoke coverage, and packaged-build readiness checks for first-frame presentation, source HWND, transparent hit-testing, and `WS_EX_NOACTIVATE`.
+
+### Fixed
+
+- GPU 顶层显示窗在一次 F8 会话内固定覆盖 Windows 虚拟屏幕，只在首帧定位一次；鼠标移动只更新透视大小的 viewport、采样坐标和形状中心，移除旧路径透视窗闪现与整体偏移来源。
+- Pin the GPU top-level surface across the Windows virtual screen for the entire F8 session and place it only on the first frame. Pointer motion updates only the portal-sized viewport, sample coordinates, and shape center, removing stale-path flashes and whole-surface drift.
+- GPU 覆盖窗保持系统级输入穿透，独立前台守卫继续保护当前宿主与 Z-order；真实点击、滚轮和原生拖放入口保持可用，滚轮不会同时控制前台页面。
+- Keep system-level input pass-through on the GPU surface and preserve the current host and Z-order with an independent foreground guard. Native click, wheel, and drag entry remains available without scrolling the foreground at the same time.
+
+### Verified
+
+- 2560×1440 @ 260Hz、RTX 5070 正式 EXE 动态测试：4 秒 WGC 新帧 `212`、GPU 提交 `855`、显示层定位 `1` 次，P95 `0.13ms`、P99 `0.24ms`。
+- Formal-EXE dynamic test on a 2560×1440 @ 260Hz RTX 5070 system: `212` new WGC frames, `855` GPU presents, one display placement, P95 `0.13ms`, and P99 `0.24ms` over four seconds.
+- 自检 `23/23`；最终 EXE 连续 3 轮通过后台点击、后台独占滚轮、前台保持、Z-order、非激活样式与恢复；托盘生命周期通过，Microsoft Defender 为 0 检出。
+- Self-tests `23/23`; the final EXE passes three consecutive runs of background click, background-only wheel, foreground preservation, Z-order, non-activating style, and restoration. Tray lifecycle passes and Microsoft Defender reports zero detections.
+
+## [2.2.0-gpu-alpha.2] - 2026-08-13
 
 - `2.2.0-gpu-alpha.2` 为独立交互回归增加本轮宿主绑定与可靠就绪握手：确认 GPU 首帧已提交、实际来源 HWND 正确、`WS_EX_NOACTIVATE` 已应用且点击位置命中预期目标后才发送真实鼠标输入，避免单文件启动期间读取旧日志或桌面前台未稳定造成误报。
 - In `2.2.0-gpu-alpha.2`, bind each independent interaction regression to its current host and wait for a reliable readiness handshake: the first GPU frame must be presented, the captured source HWND must match, `WS_EX_NOACTIVATE` must be active, and the click point must hit the expected target before native mouse input is sent. This prevents stale logs and an unsettled desktop during single-file startup from being reported as product failures.
+
+## [2.2.0-gpu-alpha.1] - 2026-08-12
+
 - `2.2.0-gpu-alpha.1` 从公开的 2.1.0 CPU 终版重新建立 GPU 开发线，保留固定 CPU 显示层、单轮单次提交、32 像素交互孔与 16 像素锚定阈值作为回退基线。
 - Rebase `2.2.0-gpu-alpha.1` on the public 2.1.0 CPU final build, preserving its fixed CPU display surface, one presentation per update, 32 px input aperture, and 16 px anchoring threshold as the fallback baseline.
 - GPU 的 WGC → D3D11 → HLSL → DirectComposition 路径改为一次 F8 会话只定位一次虚拟屏幕顶层 HWND；鼠标移动只更新 portal-sized viewport 和着色器坐标，移除 192 像素小画布的跨界移动与旧位置闪现来源。

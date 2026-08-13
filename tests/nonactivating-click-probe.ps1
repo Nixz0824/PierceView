@@ -307,7 +307,33 @@ try {
 
     [WindowPortalProbeNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
     [WindowPortalProbeNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
-    Start-Sleep -Milliseconds 50
+    $postClickReady = $false
+    $hitRootBeforeWheel = [IntPtr]::Zero
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        Start-Sleep -Milliseconds 10
+        $foregroundAfterClick = [WindowPortalProbeNative]::GetForegroundWindow()
+        $windowAboveAfterClick = [WindowPortalProbeNative]::GetVisibleWindowAbove(
+            $targetProcess.MainWindowHandle)
+        $hitBeforeWheel = [WindowPortalProbeNative]::WindowFromPoint(
+            [WindowPortalProbeNative+Point]::new($centerX, $centerY))
+        $hitRootBeforeWheel = if ($hitBeforeWheel -eq [IntPtr]::Zero) {
+            [IntPtr]::Zero
+        }
+        else {
+            [WindowPortalProbeNative]::GetAncestor($hitBeforeWheel, 2)
+        }
+        if ($foregroundAfterClick -eq $chatGpt -and
+            $windowAboveAfterClick -eq $windowAboveBefore -and
+            $hitRootBeforeWheel -eq $targetProcess.MainWindowHandle) {
+            $postClickReady = $true
+            break
+        }
+    }
+
+    if (-not $postClickReady) {
+        throw "The desktop did not settle after the background click (foreground=0x$($foregroundAfterClick.ToInt64().ToString('X')), expected=0x$($chatGpt.ToInt64().ToString('X')), above=0x$($windowAboveAfterClick.ToInt64().ToString('X')), expectedAbove=0x$($windowAboveBefore.ToInt64().ToString('X')), hit=0x$($hitRootBeforeWheel.ToInt64().ToString('X')), target=0x$($targetProcess.MainWindowHandle.ToInt64().ToString('X')))."
+    }
+
     [WindowPortalProbeNative]::mouse_event(0x0800, 0, 0, 120, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 200
 
@@ -356,6 +382,7 @@ try {
     Write-Output "READY_SOURCE_HWND=0x$($readySourceWindow.ToInt64().ToString('X'))"
     Write-Output "READY_NO_ACTIVATE=$readyNoActivate"
     Write-Output "CLICK_HIT_HWND=0x$($hitRootAtClick.ToInt64().ToString('X'))"
+    Write-Output "WHEEL_HIT_HWND=0x$($hitRootBeforeWheel.ToInt64().ToString('X'))"
     Write-Output "FOREGROUND_BEFORE=0x$($foregroundBefore.ToInt64().ToString('X'))"
     Write-Output "FOREGROUND_AFTER=0x$($foregroundAfter.ToInt64().ToString('X'))"
     Write-Output "CLICK_FORWARDED=$clickForwarded"

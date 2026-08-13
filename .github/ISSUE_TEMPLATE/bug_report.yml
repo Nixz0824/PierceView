@@ -11,7 +11,7 @@ body:
     id: version
     attributes:
       label: 版本与 SHA256 / Version and SHA256
-      placeholder: PierceView 1.0.0-rc.1 · SHA256 …
+      placeholder: PierceView 2.2.0 · SHA256 …
     validations:
       required: true
   - type: input

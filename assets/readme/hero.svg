@@ -16,11 +16,11 @@
   <text x="56" y="330" fill="#4E4C47" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="24">Hold F8 to view and interact with the window behind.</text>
 
   <g font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="15" font-weight="650">
-    <text x="56" y="390" fill="#111111">v2.1.0 · CPU EDITION / CPU 版本</text>
-    <circle cx="318" cy="385" r="3" fill="#111111"/>
-    <text x="334" y="390" fill="#111111">Windows 10 / 11</text>
-    <circle cx="475" cy="385" r="3" fill="#111111"/>
-    <text x="491" y="390" fill="#111111">稳定单层内核 / Stable single-layer core</text>
+    <text x="56" y="390" fill="#111111">v2.2.0 · GPU EDITION / GPU 版本</text>
+    <circle cx="324" cy="385" r="3" fill="#111111"/>
+    <text x="340" y="390" fill="#111111">Windows 10 / 11</text>
+    <circle cx="481" cy="385" r="3" fill="#111111"/>
+    <text x="497" y="390" fill="#111111">GPU → CPU 回退 / FALLBACK</text>
   </g>
 
   <g transform="translate(704 38)">

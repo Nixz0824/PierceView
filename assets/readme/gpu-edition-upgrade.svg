@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
+  <title id="title">寸镜 PierceView 2.2.0 GPU 版本功能提升</title>
+  <desc id="desc">Bilingual technical illustration of persistent GPU capture, fixed portal composition, automatic CPU fallback, and verified latency.</desc>
+
+  <rect width="1200" height="520" rx="28" fill="#111111"/>
+  <rect x="1" y="1" width="1198" height="518" rx="27" fill="none" stroke="#F4F1E8" stroke-width="2"/>
+
+  <text x="48" y="62" fill="#FFFDF7" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="30" font-weight="800">2.2.0 GPU 版本 / GPU EDITION</text>
+  <text x="48" y="99" fill="#D8D4CA" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="19">显存常驻、固定合成、稳定输入 / Persistent texture, fixed composition, stable input</text>
+  <rect x="932" y="42" width="220" height="56" rx="28" fill="#FFFDF7"/>
+  <text x="1042" y="77" fill="#111111" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="17" font-weight="800" text-anchor="middle">CPU 自动回退 / FALLBACK</text>
+
+  <g font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif">
+    <g transform="translate(48 138)">
+      <rect width="344" height="326" rx="20" fill="#FFFDF7" stroke="#FFFDF7" stroke-width="2"/>
+      <circle cx="30" cy="30" r="16" fill="#111111"/>
+      <text x="30" y="36" fill="#FFFDF7" font-size="16" font-weight="800" text-anchor="middle">1</text>
+
+      <rect x="54" y="55" width="100" height="94" rx="12" fill="none" stroke="#111111" stroke-width="4"/>
+      <path d="M56 82h96" stroke="#111111" stroke-width="4"/>
+      <circle cx="71" cy="69" r="3" fill="#111111"/>
+      <circle cx="82" cy="69" r="3" fill="#111111"/>
+      <rect x="197" y="62" width="93" height="80" rx="12" fill="#111111"/>
+      <path d="M168 102h20" stroke="#111111" stroke-width="4" stroke-linecap="round"/>
+      <path d="m181 94 9 8-9 8" fill="none" stroke="#111111" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M216 82h55M216 101h44M216 120h61" stroke="#FFFDF7" stroke-width="5" stroke-linecap="round"/>
+
+      <text x="172" y="220" fill="#111111" font-size="23" font-weight="800" text-anchor="middle">画面常驻显存</text>
+      <text x="172" y="249" fill="#111111" font-size="18" font-weight="700" text-anchor="middle">Persistent GPU texture</text>
+      <text x="172" y="283" fill="#4E4C47" font-size="15" text-anchor="middle">WGC 新帧与鼠标裁剪解耦</text>
+      <text x="172" y="304" fill="#4E4C47" font-size="14" text-anchor="middle">Capture and pointer cropping decoupled</text>
+    </g>
+
+    <g transform="translate(428 138)">
+      <rect width="344" height="326" rx="20" fill="#111111" stroke="#FFFDF7" stroke-width="2"/>
+      <circle cx="30" cy="30" r="16" fill="#FFFDF7"/>
+      <text x="30" y="36" fill="#111111" font-size="16" font-weight="800" text-anchor="middle">2</text>
+
+      <rect x="52" y="48" width="240" height="126" rx="14" fill="none" stroke="#FFFDF7" stroke-width="4"/>
+      <path d="M54 76h236" stroke="#FFFDF7" stroke-width="4"/>
+      <circle cx="68" cy="62" r="3" fill="#FFFDF7"/>
+      <circle cx="79" cy="62" r="3" fill="#FFFDF7"/>
+      <circle cx="90" cy="62" r="3" fill="#FFFDF7"/>
+      <circle cx="123" cy="122" r="35" fill="#FFFDF7"/>
+      <rect x="188" y="96" width="73" height="52" rx="12" fill="#FFFDF7"/>
+      <path d="M135 122h44" stroke="#FFFDF7" stroke-width="4" stroke-linecap="round"/>
+      <path d="m171 114 9 8-9 8" fill="none" stroke="#FFFDF7" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+      <text x="172" y="220" fill="#FFFDF7" font-size="23" font-weight="800" text-anchor="middle">固定虚拟屏幕显示层</text>
+      <text x="172" y="249" fill="#FFFDF7" font-size="18" font-weight="700" text-anchor="middle">Fixed composition surface</text>
+      <text x="172" y="283" fill="#D8D4CA" font-size="15" text-anchor="middle">一次 F8 会话只定位 1 次</text>
+      <text x="172" y="304" fill="#D8D4CA" font-size="14" text-anchor="middle">One display placement per F8 session</text>
+    </g>
+
+    <g transform="translate(808 138)">
+      <rect width="344" height="326" rx="20" fill="#FFFDF7" stroke="#FFFDF7" stroke-width="2"/>
+      <circle cx="30" cy="30" r="16" fill="#111111"/>
+      <text x="30" y="36" fill="#FFFDF7" font-size="16" font-weight="800" text-anchor="middle">3</text>
+
+      <text x="50" y="78" fill="#4E4C47" font-size="14" font-weight="700">260 Hz TEST / 实机测试</text>
+      <text x="50" y="126" fill="#111111" font-size="42" font-weight="800">0.13 ms</text>
+      <text x="50" y="151" fill="#4E4C47" font-size="16">P95 update latency / 更新延迟</text>
+      <path d="M50 180h244" stroke="#111111" stroke-width="2"/>
+      <text x="50" y="211" fill="#111111" font-size="18" font-weight="800">212 WGC frames</text>
+      <text x="50" y="238" fill="#111111" font-size="18" font-weight="800">855 GPU presents</text>
+      <text x="50" y="265" fill="#111111" font-size="18" font-weight="800">3× input + Z-order PASS</text>
+      <text x="50" y="304" fill="#4E4C47" font-size="14">4 seconds · RTX 5070 · 2560×1440</text>
+    </g>
+  </g>
+
+  <text x="600" y="498" fill="#D8D4CA" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="14" font-weight="650" text-anchor="middle">GPU 不可用或会话失败时自动回到 2.1.0 CPU 稳定管线 / Automatic fallback to the stable 2.1.0 CPU pipeline</text>
+</svg>
