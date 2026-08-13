@@ -81,7 +81,7 @@ internal static class Program
 
         if (options.ProbeWindow is { } probeWindow)
         {
-            return RunProbeMode(options, probeWindow);
+            return RunProbeMode(options, probeWindow, options.MultilayerProbe);
         }
 
         return RunTrayApplication(options);
@@ -134,26 +134,37 @@ internal static class Program
         }
     }
 
-    private static int RunProbeMode(PortalOptions options, nint probeWindow)
+    private static int RunProbeMode(
+        PortalOptions options,
+        nint probeWindow,
+        bool multilayerProbe)
     {
-        using var controller = new WindowRegionController(options.Radius);
+        var geometry = PortalGeometry.Rectangle(
+            UserSettings.DefaultRectangleWidth,
+            UserSettings.DefaultRectangleHeight,
+            UserSettings.DefaultFeatherWidth);
+        using var controller = new WindowRegionController(geometry);
         using var visualOverlay = new AdaptivePortalOverlay(
-            PortalGeometry.Circle(options.Radius));
+            geometry);
         RegisterEmergencyRestoration(controller, visualOverlay);
         return RunProbe(
             controller,
             visualOverlay,
+            geometry,
             probeWindow,
             options.ProbeDurationMilliseconds,
-            options.Radius);
+            options.Radius,
+            movePortal: !multilayerProbe);
     }
 
     private static int RunProbe(
         WindowRegionController controller,
         AdaptivePortalOverlay visualOverlay,
+        PortalGeometry geometry,
         nint window,
         int durationMilliseconds,
-        int radius)
+        int radius,
+        bool movePortal)
     {
         Console.WriteLine($"开始探测窗口 0x{window:X}。");
         Console.WriteLine($"前台核对：当前前台 HWND=0x{NativeMethods.GetForegroundWindow():X}。");
@@ -187,7 +198,12 @@ internal static class Program
                 return 3;
             }
 
-            if (!TryUpdateVisualPortal(controller, visualOverlay, center, out var visualError))
+            if (!TryUpdateVisualPortal(
+                    controller,
+                    visualOverlay,
+                    geometry,
+                    center,
+                    out var visualError))
             {
                 Console.Error.WriteLine("视觉穿透探测失败：" + visualError);
                 result = 6;
@@ -206,6 +222,7 @@ internal static class Program
 
             Console.WriteLine(
                 $"视觉就绪：后端={visualOverlay.ActiveBackendName}，" +
+                $"多层合成已启用：可渲染层数={visualOverlay.SourceCount}，" +
                 $"首帧已提交={visualOverlay.HasPresentedFrame}，" +
                 $"来源HWND=0x{visualOverlay.SourceWindow:X}，" +
                 $"来源非激活={visualOverlay.IsSourceNoActivateApplied}。");
@@ -221,7 +238,7 @@ internal static class Program
 
             Thread.Sleep(500);
 
-            if (result == 0)
+            if (result == 0 && movePortal)
             {
                 var frameTimes = new List<double>(30);
                 for (var frame = 1; frame <= 30; frame++)
@@ -259,7 +276,7 @@ internal static class Program
                 }
             }
 
-            if (result == 0)
+            if (result == 0 && movePortal)
             {
                 var movedInspection = controller.InspectCurrentHole(destination);
                 Console.WriteLine(
@@ -295,6 +312,32 @@ internal static class Program
                 }
             }
 
+            if (result == 0 && !movePortal)
+            {
+                var frameTimes = new List<double>(100);
+                for (var frame = 0; frame < 100; frame++)
+                {
+                    var frameStartedAt = Stopwatch.GetTimestamp();
+                    if (!visualOverlay.TryUpdate(center, out var updateError))
+                    {
+                        Console.Error.WriteLine("多层固定位置刷新失败：" + updateError);
+                        result = 6;
+                        break;
+                    }
+
+                    frameTimes.Add(
+                        Stopwatch.GetElapsedTime(frameStartedAt).TotalMilliseconds);
+                    Thread.Sleep(8);
+                }
+
+                if (frameTimes.Count > 0)
+                {
+                    Console.WriteLine(
+                        $"固定多层换帧：{frameTimes.Count} 帧，" +
+                        $"平均={frameTimes.Average():F2}ms，最慢={frameTimes.Max():F2}ms。");
+                }
+            }
+
             if (result == 0)
             {
                 Thread.Sleep(durationMilliseconds);
@@ -319,6 +362,7 @@ internal static class Program
     private static bool TryUpdateVisualPortal(
         WindowRegionController controller,
         AdaptivePortalOverlay visualOverlay,
+        PortalGeometry geometry,
         NativeMethods.Point screenPoint,
         out string? error)
     {
@@ -327,18 +371,17 @@ internal static class Program
             return visualOverlay.TryUpdate(screenPoint, out error);
         }
 
-        var sourceChild = NativeMethods.WindowFromPoint(screenPoint);
-        var sourceWindow = sourceChild == nint.Zero
-            ? nint.Zero
-            : NativeMethods.GetAncestor(sourceChild, NativeMethods.GaRoot);
-        if (sourceWindow == nint.Zero || sourceWindow == controller.ActiveWindow)
+        var sources = MultilayerWindowResolver.Resolve(
+            controller.ActiveWindow,
+            geometry.CreateFrameBounds(screenPoint));
+        if (sources.Count == 0)
         {
-            error = "没有识别到宿主窗口下方的单层视觉来源。";
+            error = "没有识别到宿主窗口后方与矩形透视区域相交的前四层窗口。";
             return false;
         }
 
         return visualOverlay.TryShow(
-            sourceWindow,
+            sources,
             controller.ActiveWindow,
             screenPoint,
             out error);
@@ -432,10 +475,11 @@ internal static class Program
     private static void PrintHelp()
     {
         Console.WriteLine(
-            "寸镜 / PierceView - Windows 单层窗口透视托盘工具\n\n" +
+            "寸镜 / PierceView - Windows 多层窗口透视实验版\n\n" +
             "用法：\n" +
             "  PierceView [--radius <像素>] [--poll-ms <毫秒>]\n" +
             "  PierceView --probe-hwnd <句柄> [--probe-duration-ms <毫秒>] [--radius <像素>]\n" +
+            "  PierceView --multilayer-probe-hwnd <句柄> [--probe-duration-ms <毫秒>]\n" +
             "  PierceView --self-test\n" +
             "  PierceView --visual-smoke [--radius <像素>]\n" +
             "  PierceView --gpu-probe\n" +
@@ -445,12 +489,14 @@ internal static class Program
             "  PierceView --inspect-hwnd <句柄> [--inspect-point <屏幕X> <屏幕Y>]\n" +
             "  PierceView --version\n\n" +
             "普通运行：\n" +
-            "  启动后只进入系统托盘。按住 F8 开启透视，松开恢复。\n" +
+            "  启动后只进入系统托盘。按住 F8 开启矩形透视，松开恢复。\n" +
+            "  实验版最多识别宿主后方 -1 到 -4 四层；超过 -4 不识别。\n" +
             "  从托盘菜单启动/暂停、设置、查看帮助或退出。\n\n" +
             "参数：\n" +
             "  --radius              圆半径，默认 180，范围 64..400\n" +
             "  --poll-ms             鼠标轮询间隔，默认 16，范围 8..100\n" +
             "  --probe-hwnd          对指定十进制或 0x 十六进制 HWND 做短暂探测\n" +
+            "  --multilayer-probe-hwnd  固定矩形位置验证最多四层同时合成\n" +
             "  --probe-duration-ms   探测持续时间，默认 1500\n" +
             "  --self-test           运行无需桌面窗口的纯逻辑自检\n" +
             "  --visual-smoke        自动视觉冒烟（采样圆形、矩形、羽化与闪黑回归）\n" +

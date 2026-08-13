@@ -63,7 +63,7 @@ internal sealed class SettingsForm : Form
         _languageInput.SelectedIndex == 1 ? Localizer.English : Localizer.Chinese;
 
     private string PortalMode =>
-        _shapeInput.SelectedIndex == 1 ? UserSettings.RectangleMode : UserSettings.CircleMode;
+        UserSettings.RectangleMode;
 
     private void BuildLayout()
     {
@@ -237,7 +237,8 @@ internal sealed class SettingsForm : Form
         _shapeInput.Items.Clear();
         _shapeInput.Items.Add(string.Empty);
         _shapeInput.Items.Add(string.Empty);
-        _shapeInput.SelectedIndex = normalized.PortalMode == UserSettings.RectangleMode ? 1 : 0;
+        _shapeInput.SelectedIndex = 1;
+        _shapeInput.Enabled = false;
         _languageInput.Items.Clear();
         _languageInput.Items.Add(Localizer.Get(Localizer.Chinese).ChineseLanguage);
         _languageInput.Items.Add(Localizer.Get(Localizer.English).EnglishLanguage);
@@ -277,7 +278,7 @@ internal sealed class SettingsForm : Form
 
     private void UpdateModeEnabledState()
     {
-        var rectangle = PortalMode == UserSettings.RectangleMode;
+        const bool rectangle = true;
         _radiusLabel.Enabled = !rectangle;
         _radiusHint.Enabled = !rectangle;
         _radiusInput.Enabled = !rectangle;

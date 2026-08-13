@@ -11,6 +11,7 @@ internal sealed class AdaptivePortalOverlay : IDisposable
     private ActiveBackend activeBackend;
     private nint activeSourceWindow;
     private nint protectedWindow;
+    private int activeSourceCount;
 
     internal AdaptivePortalOverlay(PortalGeometry geometry)
     {
@@ -90,6 +91,13 @@ internal sealed class AdaptivePortalOverlay : IDisposable
         _ => nint.Zero,
     };
 
+    internal int SourceCount => activeBackend switch
+    {
+        ActiveBackend.Gpu => gpuOverlay?.SourceCount ?? 0,
+        ActiveBackend.Cpu => cpuOverlay.IsVisible ? 1 : 0,
+        _ => 0,
+    };
+
     internal NativeMethods.Point? LastPresentedCenter => activeBackend switch
     {
         ActiveBackend.Gpu => gpuOverlay?.LastPresentedCenter,
@@ -103,13 +111,33 @@ internal sealed class AdaptivePortalOverlay : IDisposable
         NativeMethods.Point screenCenter,
         out string? error)
     {
+        return TryShow(
+            [new MultilayerWindowSource(sourceWindow, default)],
+            protectedWindow,
+            screenCenter,
+            out error);
+    }
+
+    internal bool TryShow(
+        IReadOnlyList<MultilayerWindowSource> sources,
+        nint protectedWindow,
+        NativeMethods.Point screenCenter,
+        out string? error)
+    {
         Hide();
-        activeSourceWindow = sourceWindow;
+        if (sources.Count == 0)
+        {
+            error = "没有识别到宿主窗口后方与矩形透视区域相交的窗口。";
+            return false;
+        }
+
+        activeSourceWindow = sources[0].Handle;
+        activeSourceCount = sources.Count;
         this.protectedWindow = protectedWindow;
         string? gpuError = null;
         if (gpuOverlay is not null &&
             gpuOverlay.TryShow(
-                sourceWindow,
+                sources,
                 protectedWindow,
                 screenCenter,
                 out gpuError))
@@ -119,11 +147,12 @@ internal sealed class AdaptivePortalOverlay : IDisposable
             return true;
         }
 
+        string? cpuError = null;
         if (cpuOverlay.TryShow(
-                sourceWindow,
+                activeSourceWindow,
                 protectedWindow,
                 screenCenter,
-                out var cpuError))
+                out cpuError))
         {
             activeBackend = ActiveBackend.Cpu;
             error = null;
@@ -184,6 +213,7 @@ internal sealed class AdaptivePortalOverlay : IDisposable
         activeBackend = ActiveBackend.None;
         activeSourceWindow = nint.Zero;
         protectedWindow = nint.Zero;
+        activeSourceCount = 0;
     }
 
     public void Dispose()

@@ -12,10 +12,10 @@ using Windows.Graphics.DirectX.Direct3D11;
 namespace WindowPortal;
 
 /// <summary>
-/// Experimental single-layer GPU portal:
-/// HWND WGC -> persistent D3D11 texture -> shape/feather pixel shader ->
-/// DirectComposition swap chain. Capture and cursor cropping are decoupled so a
-/// static source frame can still move with the pointer without another CPU grab.
+/// GPU portal compositor with one to four HWND WGC sources:
+/// WGC -> persistent D3D11 textures -> Z-order occlusion/shape/feather pixel
+/// shader -> one DirectComposition swap chain. Capture and cursor cropping are
+/// decoupled so static source frames can move without another CPU grab.
 /// </summary>
 internal sealed class GpuPortalOverlay : IDisposable
 {
@@ -26,11 +26,17 @@ internal sealed class GpuPortalOverlay : IDisposable
         {
             float4 SourceData; // origin x/y, texture width/height
             float4 OutputData; // canvas width/height, shape (0 circle), feather
-            float4 ShapeData;  // corner radius, circle radius, unused, unused
+            float4 ShapeData;  // corner radius, circle radius, source count, unused
             float4 PortalData; // portal width/height, local center x/y
+            float4 SourceData1;
+            float4 SourceData2;
+            float4 SourceData3;
         };
 
-        Texture2D<float4> SourceTexture : register(t0);
+        Texture2D<float4> SourceTexture0 : register(t0);
+        Texture2D<float4> SourceTexture1 : register(t1);
+        Texture2D<float4> SourceTexture2 : register(t2);
+        Texture2D<float4> SourceTexture3 : register(t3);
         SamplerState PointSampler : register(s0);
 
         float4 VSMain(uint vertexId : SV_VertexID) : SV_POSITION
@@ -54,15 +60,52 @@ internal sealed class GpuPortalOverlay : IDisposable
         float4 PSMain(float4 position : SV_POSITION) : SV_TARGET
         {
             float2 pixel = position.xy - 0.5;
-            float2 sourcePixel = SourceData.xy + pixel;
-            if (sourcePixel.x < 0.0 || sourcePixel.y < 0.0 ||
-                sourcePixel.x >= SourceData.z || sourcePixel.y >= SourceData.w)
+            float4 color = 0.0;
+            float2 sourcePixel;
+            float4 sampled;
+            if (ShapeData.z >= 4.0)
             {
-                return 0.0;
+                sourcePixel = SourceData3.xy + pixel;
+                if (sourcePixel.x >= 0.0 && sourcePixel.y >= 0.0 &&
+                    sourcePixel.x < SourceData3.z && sourcePixel.y < SourceData3.w)
+                {
+                    float2 uv = (sourcePixel + 0.5) / SourceData3.zw;
+                    color = SourceTexture3.SampleLevel(PointSampler, uv, 0.0);
+                }
             }
-
-            float2 uv = (sourcePixel + 0.5) / SourceData.zw;
-            float4 color = SourceTexture.SampleLevel(PointSampler, uv, 0.0);
+            if (ShapeData.z >= 3.0)
+            {
+                sourcePixel = SourceData2.xy + pixel;
+                if (sourcePixel.x >= 0.0 && sourcePixel.y >= 0.0 &&
+                    sourcePixel.x < SourceData2.z && sourcePixel.y < SourceData2.w)
+                {
+                    float2 uv = (sourcePixel + 0.5) / SourceData2.zw;
+                    sampled = SourceTexture2.SampleLevel(PointSampler, uv, 0.0);
+                    color = sampled + color * (1.0 - sampled.a);
+                }
+            }
+            if (ShapeData.z >= 2.0)
+            {
+                sourcePixel = SourceData1.xy + pixel;
+                if (sourcePixel.x >= 0.0 && sourcePixel.y >= 0.0 &&
+                    sourcePixel.x < SourceData1.z && sourcePixel.y < SourceData1.w)
+                {
+                    float2 uv = (sourcePixel + 0.5) / SourceData1.zw;
+                    sampled = SourceTexture1.SampleLevel(PointSampler, uv, 0.0);
+                    color = sampled + color * (1.0 - sampled.a);
+                }
+            }
+            if (ShapeData.z >= 1.0)
+            {
+                sourcePixel = SourceData.xy + pixel;
+                if (sourcePixel.x >= 0.0 && sourcePixel.y >= 0.0 &&
+                    sourcePixel.x < SourceData.z && sourcePixel.y < SourceData.w)
+                {
+                    float2 uv = (sourcePixel + 0.5) / SourceData.zw;
+                    sampled = SourceTexture0.SampleLevel(PointSampler, uv, 0.0);
+                    color = sampled + color * (1.0 - sampled.a);
+                }
+            }
             float signedDistance;
             if (OutputData.z < 0.5)
             {
@@ -108,12 +151,11 @@ internal sealed class GpuPortalOverlay : IDisposable
     private readonly ForegroundZOrderGuard foregroundGuard = new();
     private readonly System.Threading.Timer foregroundHeartbeat;
 
-    private Direct3D11CaptureFramePool? framePool;
-    private GraphicsCaptureSession? session;
-    private GraphicsCaptureItem? captureItem;
-    private ID3D11Texture2D? latestTexture;
-    private ID3D11ShaderResourceView? latestTextureView;
+    private readonly List<CaptureSource> captureSources = [];
+    private readonly Dictionary<Direct3D11CaptureFramePool, CaptureSource>
+        captureSourceByPool = [];
     private NativeMethods.Point? lastPresentedCenter;
+    private NativeMethods.Rect[]? lastPresentedSourceBounds;
     private long latestCaptureSerial;
     private long presentedCaptureSerial;
     private long presentedFrames;
@@ -234,6 +276,17 @@ internal sealed class GpuPortalOverlay : IDisposable
 
     internal nint SourceWindow { get; private set; }
 
+    internal int SourceCount
+    {
+        get
+        {
+            lock (gpuLock)
+            {
+                return captureSources.Count;
+            }
+        }
+    }
+
     internal int ForegroundRecoveryCount => foregroundGuard.RecoveryCount;
 
     internal int BackgroundPromotionCount => foregroundGuard.PromotionCount;
@@ -271,16 +324,41 @@ internal sealed class GpuPortalOverlay : IDisposable
         NativeMethods.Point screenCenter,
         out string? error)
     {
+        if (!MultilayerWindowResolver.TryGetWindowBounds(
+                sourceWindow,
+                out var sourceBounds))
+        {
+            sourceBounds = default;
+        }
+
+        return TryShow(
+            [new MultilayerWindowSource(sourceWindow, sourceBounds)],
+            protectedWindow,
+            screenCenter,
+            out error);
+    }
+
+    internal bool TryShow(
+        IReadOnlyList<MultilayerWindowSource> sources,
+        nint protectedWindow,
+        NativeMethods.Point screenCenter,
+        out string? error)
+    {
         ObjectDisposedException.ThrowIf(disposed, this);
         Hide();
-        if (sourceWindow == nint.Zero || !NativeMethods.IsWindow(sourceWindow))
+        if (sources.Count == 0 ||
+            sources.Count > MultilayerWindowResolver.MaximumLayerCount ||
+            sources.Any(source =>
+                source.Handle == nint.Zero ||
+                !NativeMethods.IsWindow(source.Handle)) ||
+            sources.Select(source => source.Handle).Distinct().Count() != sources.Count)
         {
-            error = "透视区域下方没有可用于 GPU 捕获的窗口。";
+            error = "透视区域下方没有 1 到 4 个有效且不重复的 GPU 捕获窗口。";
             return false;
         }
 
         if (!foregroundGuard.TryEnable(
-                sourceWindow,
+                sources[0].Handle,
                 protectedWindow,
                 screenCenter,
                 geometry.GuardRadius,
@@ -291,24 +369,29 @@ internal sealed class GpuPortalOverlay : IDisposable
 
         try
         {
-            captureItem = GraphicsCaptureInterop.CreateForWindow(sourceWindow);
-            framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
-                resources.CaptureDevice,
-                DirectXPixelFormat.B8G8R8A8UIntNormalized,
-                2,
-                captureItem.Size);
-            session = framePool.CreateCaptureSession(captureItem);
-            session.IsCursorCaptureEnabled = false;
-            framePool.FrameArrived += OnFrameArrived;
-            SourceWindow = sourceWindow;
+            foreach (var source in sources)
+            {
+                var captureSource = CaptureSource.Create(
+                    source.Handle,
+                    resources.CaptureDevice);
+                captureSource.FramePool.FrameArrived += OnFrameArrived;
+                captureSources.Add(captureSource);
+                captureSourceByPool.Add(captureSource.FramePool, captureSource);
+            }
+
+            SourceWindow = sources[0].Handle;
             active = true;
             lastPresentedCenter = null;
+            lastPresentedSourceBounds = null;
             latestCaptureSerial = 0;
             presentedCaptureSerial = 0;
             presentedFrames = 0;
             displayPlacementCount = 0;
             captureFailure = null;
-            session.StartCapture();
+            foreach (var source in captureSources)
+            {
+                source.Session.StartCapture();
+            }
             _ = foregroundHeartbeat.Change(16, 16);
             error = null;
             return true;
@@ -344,17 +427,34 @@ internal sealed class GpuPortalOverlay : IDisposable
             return false;
         }
 
-        if (!TryGetCaptureBounds(SourceWindow, out var sourceBounds))
-        {
-            error = "无法读取 GPU 捕获窗口的位置。";
-            return false;
-        }
-
         lock (gpuLock)
         {
-            var texture = latestTexture;
-            var textureView = latestTextureView;
-            if (texture is null || textureView is null)
+            if (captureSources.Count == 0)
+            {
+                error = "GPU 多层来源已停止。";
+                return false;
+            }
+
+            var sourceBounds = new NativeMethods.Rect[captureSources.Count];
+            for (var index = 0; index < captureSources.Count; index++)
+            {
+                var source = captureSources[index];
+                if (source.Texture is null || source.TextureView is null)
+                {
+                    error = null;
+                    return true;
+                }
+
+                if (!MultilayerWindowResolver.TryGetWindowBounds(
+                        source.Window,
+                        out sourceBounds[index]))
+                {
+                    error = $"无法读取第 {index + 1} 层 GPU 捕获窗口的位置。";
+                    return false;
+                }
+            }
+
+            if (captureSources.Any(source => source.Texture is null))
             {
                 error = null;
                 return true;
@@ -362,18 +462,26 @@ internal sealed class GpuPortalOverlay : IDisposable
 
             var captureSerial = Interlocked.Read(ref latestCaptureSerial);
             if (lastPresentedCenter == screenCenter &&
-                presentedCaptureSerial == captureSerial)
+                presentedCaptureSerial == captureSerial &&
+                SourceBoundsEqual(lastPresentedSourceBounds, sourceBounds))
             {
                 error = null;
                 return true;
             }
 
+            var sourceData = new Vector4[MultilayerWindowResolver.MaximumLayerCount];
+            for (var index = 0; index < captureSources.Count; index++)
+            {
+                var textureDescription = captureSources[index].Texture!.Description;
+                sourceData[index] = new Vector4(
+                    canvasBounds.Left - sourceBounds[index].Left,
+                    canvasBounds.Top - sourceBounds[index].Top,
+                    textureDescription.Width,
+                    textureDescription.Height);
+            }
+
             var parameters = new PortalShaderParameters(
-                new Vector4(
-                    canvasBounds.Left - sourceBounds.Left,
-                    canvasBounds.Top - sourceBounds.Top,
-                    texture.Description.Width,
-                    texture.Description.Height),
+                sourceData[0],
                 new Vector4(
                     canvasWidth,
                     canvasHeight,
@@ -382,13 +490,16 @@ internal sealed class GpuPortalOverlay : IDisposable
                 new Vector4(
                     geometry.EffectiveCornerRadius,
                     geometry.Radius,
-                    0f,
+                    captureSources.Count,
                     0f),
                 new Vector4(
                     geometry.FrameWidth,
                     geometry.FrameHeight,
                     screenCenter.X - canvasBounds.Left,
-                    screenCenter.Y - canvasBounds.Top));
+                    screenCenter.Y - canvasBounds.Top),
+                sourceData[1],
+                sourceData[2],
+                sourceData[3]);
             resources.Context.UpdateSubresource(
                 in parameters,
                 parameterBuffer,
@@ -414,11 +525,19 @@ internal sealed class GpuPortalOverlay : IDisposable
             resources.Context.IASetPrimitiveTopology(PrimitiveTopology.TriangleList);
             resources.Context.VSSetShader(vertexShader);
             resources.Context.PSSetShader(pixelShader);
-            resources.Context.PSSetShaderResource(0, textureView);
+            for (var index = 0; index < captureSources.Count; index++)
+            {
+                resources.Context.PSSetShaderResource(
+                    checked((uint)index),
+                    captureSources[index].TextureView!);
+            }
             resources.Context.PSSetSampler(0, sampler);
             resources.Context.PSSetConstantBuffer(0, parameterBuffer);
             resources.Context.Draw(3, 0);
-            resources.Context.PSUnsetShaderResource(0);
+            for (var index = 0; index < captureSources.Count; index++)
+            {
+                resources.Context.PSUnsetShaderResource(checked((uint)index));
+            }
             resources.Context.UnsetRenderTargets();
             swapChain.Present(0, PresentFlags.None).CheckError();
             Interlocked.Increment(ref presentedFrames);
@@ -446,6 +565,7 @@ internal sealed class GpuPortalOverlay : IDisposable
 
             windowShown = true;
             lastPresentedCenter = screenCenter;
+            lastPresentedSourceBounds = sourceBounds;
             presentedCaptureSerial = captureSerial;
         }
 
@@ -481,24 +601,24 @@ internal sealed class GpuPortalOverlay : IDisposable
         }
 
         windowShown = false;
-        var oldPool = framePool;
-        framePool = null;
-        if (oldPool is not null)
-        {
-            oldPool.FrameArrived -= OnFrameArrived;
-        }
-
-        session?.Dispose();
-        session = null;
-        oldPool?.Dispose();
-        captureItem = null;
+        CaptureSource[] oldSources;
         lock (gpuLock)
         {
-            latestTextureView?.Dispose();
-            latestTextureView = null;
-            latestTexture?.Dispose();
-            latestTexture = null;
+            oldSources = captureSources.ToArray();
+            captureSources.Clear();
+            captureSourceByPool.Clear();
+        }
+
+        foreach (var source in oldSources)
+        {
+            source.FramePool.FrameArrived -= OnFrameArrived;
+            source.Dispose();
+        }
+
+        lock (gpuLock)
+        {
             lastPresentedCenter = null;
+            lastPresentedSourceBounds = null;
             latestCaptureSerial = 0;
             presentedCaptureSerial = 0;
             presentedFrames = 0;
@@ -537,8 +657,19 @@ internal sealed class GpuPortalOverlay : IDisposable
         try
         {
             _ = arguments;
+            CaptureSource? captureSource;
+            lock (gpuLock)
+            {
+                captureSourceByPool.TryGetValue(sender, out captureSource);
+            }
+
+            if (captureSource is null)
+            {
+                return;
+            }
+
             using var frame = sender.TryGetNextFrame();
-            if (frame is null || !active || !ReferenceEquals(sender, framePool))
+            if (frame is null || !active)
             {
                 return;
             }
@@ -564,18 +695,20 @@ internal sealed class GpuPortalOverlay : IDisposable
             using var sourceTexture = access.GetInterface<ID3D11Texture2D>();
             lock (gpuLock)
             {
-                if (!active || !ReferenceEquals(sender, framePool))
+                if (!active ||
+                    !captureSourceByPool.TryGetValue(sender, out var currentSource) ||
+                    !ReferenceEquals(captureSource, currentSource))
                 {
                     return;
                 }
 
                 var description = sourceTexture.Description;
-                if (latestTexture is null ||
-                    latestTexture.Description.Width != description.Width ||
-                    latestTexture.Description.Height != description.Height)
+                if (captureSource.Texture is null ||
+                    captureSource.Texture.Description.Width != description.Width ||
+                    captureSource.Texture.Description.Height != description.Height)
                 {
-                    latestTextureView?.Dispose();
-                    latestTexture?.Dispose();
+                    captureSource.TextureView?.Dispose();
+                    captureSource.Texture?.Dispose();
                     var persistentDescription = new Texture2DDescription(
                         Format.B8G8R8A8_UNorm,
                         description.Width,
@@ -588,14 +721,14 @@ internal sealed class GpuPortalOverlay : IDisposable
                         1,
                         0,
                         ResourceOptionFlags.None);
-                    latestTexture = resources.Device.CreateTexture2D(
+                    captureSource.Texture = resources.Device.CreateTexture2D(
                         persistentDescription);
-                    latestTextureView = resources.Device.CreateShaderResourceView(
-                        latestTexture,
+                    captureSource.TextureView = resources.Device.CreateShaderResourceView(
+                        captureSource.Texture,
                         null);
                 }
 
-                resources.Context.CopyResource(latestTexture, sourceTexture);
+                resources.Context.CopyResource(captureSource.Texture, sourceTexture);
                 Interlocked.Increment(ref latestCaptureSerial);
             }
         }
@@ -607,23 +740,24 @@ internal sealed class GpuPortalOverlay : IDisposable
         }
     }
 
-    private static bool TryGetCaptureBounds(
-        nint window,
-        out NativeMethods.Rect bounds)
+    private static bool SourceBoundsEqual(
+        IReadOnlyList<NativeMethods.Rect>? first,
+        IReadOnlyList<NativeMethods.Rect> second)
     {
-        var extendedFrameResult = NativeMethods.DwmGetWindowAttribute(
-            window,
-            NativeMethods.DwmwaExtendedFrameBounds,
-            out bounds,
-            Marshal.SizeOf<NativeMethods.Rect>());
-        if (extendedFrameResult == 0 && bounds.Width > 1 && bounds.Height > 1)
+        if (first is null || first.Count != second.Count)
         {
-            return true;
+            return false;
         }
 
-        return NativeMethods.GetWindowRect(window, out bounds) &&
-               bounds.Width > 1 &&
-               bounds.Height > 1;
+        for (var index = 0; index < first.Count; index++)
+        {
+            if (first[index] != second[index])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     internal static NativeMethods.Rect CreateVirtualCanvasBounds(
@@ -655,7 +789,77 @@ internal sealed class GpuPortalOverlay : IDisposable
         Vector4 SourceData,
         Vector4 OutputData,
         Vector4 ShapeData,
-        Vector4 PortalData);
+        Vector4 PortalData,
+        Vector4 SourceData1,
+        Vector4 SourceData2,
+        Vector4 SourceData3);
+
+    private sealed class CaptureSource : IDisposable
+    {
+        private CaptureSource(
+            nint window,
+            GraphicsCaptureItem captureItem,
+            Direct3D11CaptureFramePool framePool,
+            GraphicsCaptureSession session)
+        {
+            Window = window;
+            CaptureItem = captureItem;
+            FramePool = framePool;
+            Session = session;
+        }
+
+        internal nint Window { get; }
+
+        internal GraphicsCaptureItem CaptureItem { get; }
+
+        internal Direct3D11CaptureFramePool FramePool { get; }
+
+        internal GraphicsCaptureSession Session { get; }
+
+        internal ID3D11Texture2D? Texture { get; set; }
+
+        internal ID3D11ShaderResourceView? TextureView { get; set; }
+
+        internal static CaptureSource Create(
+            nint window,
+            IDirect3DDevice captureDevice)
+        {
+            var captureItem = GraphicsCaptureInterop.CreateForWindow(window);
+            Direct3D11CaptureFramePool? framePool = null;
+            GraphicsCaptureSession? session = null;
+            try
+            {
+                framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
+                    captureDevice,
+                    DirectXPixelFormat.B8G8R8A8UIntNormalized,
+                    2,
+                    captureItem.Size);
+                session = framePool.CreateCaptureSession(captureItem);
+                session.IsCursorCaptureEnabled = false;
+                return new CaptureSource(
+                    window,
+                    captureItem,
+                    framePool,
+                    session);
+            }
+            catch
+            {
+                session?.Dispose();
+                framePool?.Dispose();
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            TextureView?.Dispose();
+            TextureView = null;
+            Texture?.Dispose();
+            Texture = null;
+            Session.Dispose();
+            FramePool.Dispose();
+        }
+    }
 
     private sealed class PortalGpuForm : Form
     {

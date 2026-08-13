@@ -68,6 +68,8 @@ internal static class NativeMethods
 	internal const int GwlStyle = -16;
 
 	internal const int GwlExStyle = -20;
+	internal const long WsChild = 0x40000000L;
+	internal const long WsExToolWindow = 0x00000080L;
 	internal const long WsExNoActivate = 0x08000000L;
 
 	internal const uint DwmwaCloaked = 14u;
@@ -259,6 +261,10 @@ internal static class NativeMethods
 	[DllImport("user32.dll")]
 	[return: MarshalAs(UnmanagedType.Bool)]
 	internal static extern bool IsWindowVisible(nint window);
+
+	[DllImport("user32.dll")]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	internal static extern bool IsIconic(nint window);
 
 	[DllImport("user32.dll", SetLastError = true)]
 	internal static extern uint GetWindowThreadProcessId(nint window, out uint processId);

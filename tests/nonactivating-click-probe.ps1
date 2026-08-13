@@ -270,7 +270,7 @@ try {
 
             $readyMatch = [regex]::Match(
                 $logText,
-                '视觉就绪：后端=([^，]+)，首帧已提交=(True|False)，来源HWND=0x([0-9A-Fa-f]+)，来源非激活=(True|False)')
+                '视觉就绪：后端=([^，]+)，(?:多层合成已启用：可渲染层数=\d+，)?首帧已提交=(True|False)，来源HWND=0x([0-9A-Fa-f]+)，来源非激活=(True|False)')
             if ($readyMatch.Success) {
                 $readyBackend = $readyMatch.Groups[1].Value
                 $readyFirstFrame = [bool]::Parse($readyMatch.Groups[2].Value)

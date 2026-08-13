@@ -6,6 +6,17 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 ## [Unreleased]
 
+### 2.3.0-multilayer-alpha.1 (local experimental build)
+
+- 基于 2.2.0 稳定 GPU 管线新增矩形多窗口遮挡重建：按真实屏幕位置和 Z-order 同时组合宿主后方 `-1` 至 `-4`，超过 `-4` 不识别；最终仍只使用一张固定 DirectComposition 显示层并且每轮只提交一次。
+- Add rounded-rectangle multi-window occlusion reconstruction on the stable 2.2.0 GPU pipeline. It composites the real screen positions and Z-order of layers `-1` through `-4`, ignores anything deeper than `-4`, and retains one fixed DirectComposition display surface with one present per update.
+- 每个来源使用独立 WGC 会话与常驻 D3D11 纹理，最外层统一应用圆角与羽化；任何多层 GPU 启动或运行失败均安全回退到 2.1.0 单层 CPU 管线。
+- Give each source its own WGC session and persistent D3D11 texture, then apply one outer rounded/feathered mask. Any multi-source GPU startup or runtime failure safely falls back to the 2.1.0 single-layer CPU renderer.
+- 本 alpha 只验证多层视觉与性能，深层点击重排尚未加入；真实输入仍由 Windows 当前命中的最前一层接收。
+- This alpha validates multi-layer visuals and performance only. Deep-layer click reordering is not included; native input still goes to the frontmost window hit by Windows.
+- 自动四层测试确认四种来源同时可见、固定显示层位置数为 1、无无效合成帧，100 次固定刷新平均 `0.22ms`、最慢 `0.77ms`（本机 2560×1440 @ 260Hz）。
+- Automated four-layer testing confirms all four sources are simultaneously visible, one fixed display position, no invalid composite frames, and 100 stationary updates averaging `0.22ms` with a `0.77ms` maximum (local 2560×1440 @ 260Hz system).
+
 ## [2.2.0] - 2026-08-13
 
 ### GPU Edition / GPU 版本

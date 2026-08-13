@@ -10,14 +10,14 @@
     <AssemblyName>PierceView</AssemblyName>
     <RootNamespace>WindowPortal</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>2.2.0</Version>
-    <AssemblyVersion>2.2.0.0</AssemblyVersion>
-    <FileVersion>2.2.0.0</FileVersion>
-    <InformationalVersion>2.2.0</InformationalVersion>
+    <Version>2.3.0</Version>
+    <AssemblyVersion>2.3.0.0</AssemblyVersion>
+    <FileVersion>2.3.0.0</FileVersion>
+    <InformationalVersion>2.3.0-multilayer-alpha.1</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>寸镜 / PierceView</Product>
     <Company>PierceView Project</Company>
-    <Description>GPU 优先、CPU 自动回退的单层窗口透视托盘工具</Description>
+    <Description>GPU 多窗口遮挡重建实验版；最多识别宿主后方四层窗口</Description>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
 

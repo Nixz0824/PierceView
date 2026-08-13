@@ -134,7 +134,10 @@ public static class MultiLayerVisualProbeNative
         }
     }
 
-    public static PortalWindowState[] GetVisiblePortalStates(uint processId, int diameter)
+    public static PortalWindowState[] GetVisiblePortalStates(
+        uint processId,
+        int minimumWidth,
+        int minimumHeight)
     {
         List<PortalWindowState> result = new List<PortalWindowState>();
         EnumWindows(delegate(IntPtr window, IntPtr parameter)
@@ -145,8 +148,8 @@ public static class MultiLayerVisualProbeNative
             if (windowProcessId == processId &&
                 IsWindowVisible(window) &&
                 GetWindowRect(window, out rect) &&
-                rect.Width == diameter &&
-                rect.Height == diameter)
+                rect.Width >= minimumWidth &&
+                rect.Height >= minimumHeight)
             {
                 IntPtr region = CreateRectRgn(0, 0, 0, 0);
                 int regionType = region == IntPtr.Zero ? 0 : GetWindowRgn(window, region);
@@ -206,6 +209,7 @@ $portalOutput = Join-Path $diagnosticDirectory 'multilayer-visual-probe.log'
 $portalError = Join-Path $diagnosticDirectory 'multilayer-visual-probe.error.log'
 $screenshotPath = Join-Path $diagnosticDirectory 'multilayer-visual-probe.png'
 $deepProcess = $null
+$deepestProcess = $null
 $middleProcess = $null
 $shallowProcess = $null
 $portalProcess = $null
@@ -232,14 +236,16 @@ function Test-ColorNear(
 
 function Get-KnownLayerCoverage(
     [System.Drawing.Bitmap]$Bitmap,
-    [int]$Radius) {
+    [int]$HalfWidth,
+    [int]$HalfHeight) {
     $knownPixelCount = 0
     $sampledPixelCount = 0
     for ($y = 4; $y -lt $Bitmap.Height; $y += 8) {
         for ($x = 4; $x -lt $Bitmap.Width; $x += 8) {
-            $offsetX = $x - $Radius
-            $offsetY = $y - $Radius
-            if (($offsetX * $offsetX) + ($offsetY * $offsetY) -gt ($Radius * $Radius)) {
+            $offsetX = $x - $HalfWidth
+            $offsetY = $y - $HalfHeight
+            if ([Math]::Abs($offsetX) -gt $HalfWidth -or
+                [Math]::Abs($offsetY) -gt $HalfHeight) {
                 continue
             }
 
@@ -247,7 +253,8 @@ function Get-KnownLayerCoverage(
             $pixel = $Bitmap.GetPixel($x, $y)
             if ((Test-ColorNear $pixel ([System.Drawing.Color]::FromArgb(217, 74, 74)) 65) -or
                 (Test-ColorNear $pixel ([System.Drawing.Color]::FromArgb(53, 107, 214)) 65) -or
-                (Test-ColorNear $pixel ([System.Drawing.Color]::FromArgb(53, 167, 101)) 65)) {
+                (Test-ColorNear $pixel ([System.Drawing.Color]::FromArgb(53, 167, 101)) 65) -or
+                (Test-ColorNear $pixel ([System.Drawing.Color]::FromArgb(218, 166, 45)) 65)) {
                 $knownPixelCount++
             }
         }
@@ -261,16 +268,20 @@ function Get-KnownLayerCoverage(
 }
 
 try {
+    $deepestProcess = Start-Process -FilePath $targetPath -ArgumentList @(
+        '--passive', '--label', 'LAYER-4-YELLOW', '--color', '#DAA62D') -PassThru
     $deepProcess = Start-Process -FilePath $targetPath -ArgumentList @(
         '--passive', '--label', 'LAYER-3-BLUE', '--color', '#356BD6') -PassThru
     $middleProcess = Start-Process -FilePath $targetPath -ArgumentList @(
         '--passive', '--label', 'LAYER-2-GREEN', '--color', '#35A765') -PassThru
     $shallowProcess = Start-Process -FilePath $targetPath -ArgumentList @(
         '--passive', '--label', 'LAYER-1-RED', '--color', '#D94A4A') -PassThru
+    Wait-MainWindow $deepestProcess
     Wait-MainWindow $deepProcess
     Wait-MainWindow $middleProcess
     Wait-MainWindow $shallowProcess
 
+    $deepestWindow = [IntPtr]$deepestProcess.MainWindowHandle
     $deepWindow = [IntPtr]$deepProcess.MainWindowHandle
     $middleWindow = [IntPtr]$middleProcess.MainWindowHandle
     $shallowWindow = [IntPtr]$shallowProcess.MainWindowHandle
@@ -279,18 +290,18 @@ try {
         throw 'Could not read the ChatGPT window rectangle.'
     }
 
-    $radius = 180
-    $diameter = 361
+    $portalWidth = 420
+    $portalHeight = 280
+    $portalHalfWidth = [int]($portalWidth / 2)
+    $portalHalfHeight = [int]($portalHeight / 2)
     $centerX = $chatRect.Left + [int](($chatRect.Right - $chatRect.Left) / 2)
     $centerY = $chatRect.Top + [int](($chatRect.Bottom - $chatRect.Top) / 2)
     $positionFlags = 0x0010
 
-    # Keep the deepest source under the complete horizontal sweep used by
-    # WindowPortal's probe mode. The shallower red/green windows still expose
-    # three distinct layers at the center, while blue provides a valid source
-    # after the probe leaves those narrow windows.
+    # Four quadrants reconstruct -1/-2/-3 over the full -4 background. Each
+    # foreground source is intentionally smaller than the source behind it.
     [MultiLayerVisualProbeNative]::SetWindowPos(
-        $deepWindow,
+        $deepestWindow,
         $chatGpt,
         $chatRect.Left,
         $centerY - 210,
@@ -298,14 +309,22 @@ try {
         420,
         $positionFlags) | Out-Null
     [MultiLayerVisualProbeNative]::SetWindowPos(
-        $middleWindow, $chatGpt, $centerX + 40, $centerY - 180, 140, 360, $positionFlags) | Out-Null
+        $deepWindow,
+        $chatGpt,
+        $centerX - 180,
+        $centerY + 20,
+        160,
+        100,
+        $positionFlags) | Out-Null
     [MultiLayerVisualProbeNative]::SetWindowPos(
-        $shallowWindow, $chatGpt, $centerX - 180, $centerY - 180, 140, 360, $positionFlags) | Out-Null
+        $middleWindow, $chatGpt, $centerX + 20, $centerY - 120, 160, 100, $positionFlags) | Out-Null
+    [MultiLayerVisualProbeNative]::SetWindowPos(
+        $shallowWindow, $chatGpt, $centerX - 180, $centerY - 120, 160, 100, $positionFlags) | Out-Null
     [MultiLayerVisualProbeNative]::ForceForeground($chatGpt) | Out-Null
 
     # Re-apply the deterministic application order after bringing ChatGPT forward.
     [MultiLayerVisualProbeNative]::SetWindowPos(
-        $deepWindow,
+        $deepestWindow,
         $chatGpt,
         $chatRect.Left,
         $centerY - 210,
@@ -313,9 +332,17 @@ try {
         420,
         $positionFlags) | Out-Null
     [MultiLayerVisualProbeNative]::SetWindowPos(
-        $middleWindow, $chatGpt, $centerX + 40, $centerY - 180, 140, 360, $positionFlags) | Out-Null
+        $deepWindow,
+        $chatGpt,
+        $centerX - 180,
+        $centerY + 20,
+        160,
+        100,
+        $positionFlags) | Out-Null
     [MultiLayerVisualProbeNative]::SetWindowPos(
-        $shallowWindow, $chatGpt, $centerX - 180, $centerY - 180, 140, 360, $positionFlags) | Out-Null
+        $middleWindow, $chatGpt, $centerX + 20, $centerY - 120, 160, 100, $positionFlags) | Out-Null
+    [MultiLayerVisualProbeNative]::SetWindowPos(
+        $shallowWindow, $chatGpt, $centerX - 180, $centerY - 120, 160, 100, $positionFlags) | Out-Null
     Start-Sleep -Milliseconds 150
 
     if ([MultiLayerVisualProbeNative]::GetForegroundWindow() -ne $chatGpt) {
@@ -327,7 +354,7 @@ try {
     # frame while the process is still completing its finally block.
     $portalProcess = Start-Process `
         -FilePath $portalPath `
-        -ArgumentList @('--probe-hwnd', "0x$($ChatGptWindow.ToString('X'))", '--probe-duration-ms', '2500', '--radius', "$radius") `
+        -ArgumentList @('--multilayer-probe-hwnd', "0x$($ChatGptWindow.ToString('X'))", '--probe-duration-ms', '2500') `
         -WindowStyle Hidden `
         -PassThru `
         -RedirectStandardOutput $portalOutput `
@@ -356,24 +383,29 @@ try {
     }
 
     Start-Sleep -Milliseconds 80
-    $bitmap = [System.Drawing.Bitmap]::new($diameter, $diameter)
+    $bitmap = [System.Drawing.Bitmap]::new($portalWidth, $portalHeight)
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
     try {
         $graphics.CopyFromScreen(
-            $centerX - $radius,
-            $centerY - $radius,
+            $centerX - $portalHalfWidth,
+            $centerY - $portalHalfHeight,
             0,
             0,
-            [System.Drawing.Size]::new($diameter, $diameter))
+            [System.Drawing.Size]::new($portalWidth, $portalHeight))
         $bitmap.Save($screenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
-        $leftPixel = $bitmap.GetPixel($radius - 100, $radius + 80)
-        $centerPixel = $bitmap.GetPixel($radius, $radius + 80)
-        $rightPixel = $bitmap.GetPixel($radius + 100, $radius + 80)
+        $leftPixel = $bitmap.GetPixel($portalHalfWidth - 100, $portalHalfHeight - 50)
+        $centerPixel = $bitmap.GetPixel($portalHalfWidth + 100, $portalHalfHeight - 50)
+        $rightPixel = $bitmap.GetPixel($portalHalfWidth - 100, $portalHalfHeight + 90)
+        $deepestPixel = $bitmap.GetPixel($portalHalfWidth + 100, $portalHalfHeight + 90)
     }
     finally {
         $graphics.Dispose()
         $bitmap.Dispose()
     }
+
+    # The DirectComposition display HWND stays fixed at the virtual-screen
+    # origin. This probe keeps the shader crop fixed as well for deterministic
+    # four-layer stability sampling.
 
     $maxDistinctPortalPositions = 0
     $missingPortalRegionFrameCount = 0
@@ -391,7 +423,8 @@ try {
         for ($sample = 0; $sample -lt 100 -and -not $portalProcess.HasExited; $sample++) {
             $states = [MultiLayerVisualProbeNative]::GetVisiblePortalStates(
                 [uint32]$portalProcess.Id,
-                $diameter)
+                $portalWidth,
+                $portalHeight)
             $distinctPositions = @($states | ForEach-Object {
                 "$($_.Bounds.Left),$($_.Bounds.Top),$($_.Bounds.Right),$($_.Bounds.Bottom)"
             } | Sort-Object -Unique).Count
@@ -404,8 +437,8 @@ try {
             else {
                 $sampleBounds = $states[0].Bounds
                 $sampleGraphics.CopyFromScreen(
-                    $sampleBounds.Left + $radius,
-                    $sampleBounds.Top + $radius + 80,
+                    $centerX,
+                    $centerY + 80,
                     0,
                     0,
                     [System.Drawing.Size]::new(1, 1))
@@ -413,22 +446,28 @@ try {
                 $knownLayerColor =
                     (Test-ColorNear $samplePixel ([System.Drawing.Color]::FromArgb(217, 74, 74)) 65) -or
                     (Test-ColorNear $samplePixel ([System.Drawing.Color]::FromArgb(53, 107, 214)) 65) -or
-                    (Test-ColorNear $samplePixel ([System.Drawing.Color]::FromArgb(53, 167, 101)) 65)
+                    (Test-ColorNear $samplePixel ([System.Drawing.Color]::FromArgb(53, 167, 101)) 65) -or
+                    (Test-ColorNear $samplePixel ([System.Drawing.Color]::FromArgb(218, 166, 45)) 65)
                 if (-not $knownLayerColor) {
                     $stateSummary = @($states | ForEach-Object {
                         "r=$($_.RegionType),a=$($_.LayeredAlpha),f=0x$($_.LayeredFlags.ToString('X'))"
                     }) -join '|'
-                    $invalidFrameBitmap = [System.Drawing.Bitmap]::new($diameter, $diameter)
+                    $invalidFrameBitmap = [System.Drawing.Bitmap]::new($portalWidth, $portalHeight)
                     $invalidFrameGraphics = [System.Drawing.Graphics]::FromImage($invalidFrameBitmap)
                     try {
                         $invalidFrameGraphics.CopyFromScreen(
-                            $sampleBounds.Left,
-                            $sampleBounds.Top,
+                            $centerX - $portalHalfWidth,
+                            $centerY - $portalHalfHeight,
                             0,
                             0,
-                            [System.Drawing.Size]::new($diameter, $diameter))
-                        $confirmationPixel = $invalidFrameBitmap.GetPixel($radius, $radius + 80)
-                        $knownLayerCoverage = Get-KnownLayerCoverage $invalidFrameBitmap $radius
+                            [System.Drawing.Size]::new($portalWidth, $portalHeight))
+                        $confirmationPixel = $invalidFrameBitmap.GetPixel(
+                            $portalHalfWidth,
+                            $portalHalfHeight + 80)
+                        $knownLayerCoverage = Get-KnownLayerCoverage `
+                            $invalidFrameBitmap `
+                            $portalHalfWidth `
+                            $portalHalfHeight
                         if ($knownLayerCoverage -ge 0.2) {
                             $confirmedValidNonLayerPointSampleCount++
                         }
@@ -474,6 +513,7 @@ try {
             }).Count
             if (@($states | Where-Object {
                 ($_.ExtendedStyle -band 0x00080000) -ne 0 -and
+                $_.LayeredFlags -ne 0 -and
                 (($_.LayeredFlags -band 0x00000002) -eq 0 -or
                  ($_.LayeredAlpha -ne 1 -and $_.LayeredAlpha -ne 255))
             }).Count -gt 0 -or
@@ -494,7 +534,7 @@ try {
     $layerMatch = [regex]::Match($portalLogText, '多层合成(?:已启用)?：可渲染层数=(\d+)')
     $timingMatch = [regex]::Match(
         $portalLogText,
-        '连续换帧：\d+ 帧，平均=([\d.]+)ms，最慢=([\d.]+)ms')
+        '固定多层换帧：\d+ 帧，平均=([\d.]+)ms，最慢=([\d.]+)ms|连续换帧：\d+ 帧，平均=([\d.]+)ms，最慢=([\d.]+)ms')
     $renderedLayerCount = if ($layerMatch.Success) {
         [int]$layerMatch.Groups[1].Value
     }
@@ -502,22 +542,36 @@ try {
         0
     }
     $averageFrameMilliseconds = if ($timingMatch.Success) {
-        [double]$timingMatch.Groups[1].Value
+        $value = if ($timingMatch.Groups[1].Success) {
+            $timingMatch.Groups[1].Value
+        }
+        else {
+            $timingMatch.Groups[3].Value
+        }
+        [double]$value
     }
     else {
         [double]::PositiveInfinity
     }
     $slowestFrameMilliseconds = if ($timingMatch.Success) {
-        [double]$timingMatch.Groups[2].Value
+        $value = if ($timingMatch.Groups[2].Success) {
+            $timingMatch.Groups[2].Value
+        }
+        else {
+            $timingMatch.Groups[4].Value
+        }
+        [double]$value
     }
     else {
         [double]::PositiveInfinity
     }
 
     $leftLayerVisible = Test-ColorNear $leftPixel ([System.Drawing.Color]::FromArgb(217, 74, 74))
-    $centerLayerVisible = Test-ColorNear $centerPixel ([System.Drawing.Color]::FromArgb(53, 107, 214))
-    $rightLayerVisible = Test-ColorNear $rightPixel ([System.Drawing.Color]::FromArgb(53, 167, 101))
-    $threeLayersVisible = $leftLayerVisible -and $centerLayerVisible -and $rightLayerVisible
+    $centerLayerVisible = Test-ColorNear $centerPixel ([System.Drawing.Color]::FromArgb(53, 167, 101))
+    $rightLayerVisible = Test-ColorNear $rightPixel ([System.Drawing.Color]::FromArgb(53, 107, 214))
+    $deepestLayerVisible = Test-ColorNear $deepestPixel ([System.Drawing.Color]::FromArgb(218, 166, 45))
+    $fourLayersVisible = $leftLayerVisible -and $centerLayerVisible -and
+        $rightLayerVisible -and $deepestLayerVisible
     $layerPositionsSynchronized = $maxDistinctPortalPositions -le 1
     $performanceWithinBudget = $averageFrameMilliseconds -lt 25 -and $slowestFrameMilliseconds -lt 150
 
@@ -526,7 +580,8 @@ try {
     Write-Output "LEFT_PIXEL=$($leftPixel.R),$($leftPixel.G),$($leftPixel.B)"
     Write-Output "CENTER_PIXEL=$($centerPixel.R),$($centerPixel.G),$($centerPixel.B)"
     Write-Output "RIGHT_PIXEL=$($rightPixel.R),$($rightPixel.G),$($rightPixel.B)"
-    Write-Output "THREE_LAYERS_VISIBLE=$threeLayersVisible"
+    Write-Output "DEEPEST_PIXEL=$($deepestPixel.R),$($deepestPixel.G),$($deepestPixel.B)"
+    Write-Output "FOUR_LAYERS_VISIBLE=$fourLayersVisible"
     Write-Output "MAX_DISTINCT_PORTAL_POSITIONS=$maxDistinctPortalPositions"
     Write-Output "LAYER_POSITIONS_SYNCHRONIZED=$layerPositionsSynchronized"
     Write-Output "MISSING_PORTAL_REGION_FRAMES=$missingPortalRegionFrameCount"
@@ -544,12 +599,10 @@ try {
     Write-Output "SCREENSHOT=$screenshotPath"
 
     if ($portalExitCode -ne 0 -or
-        $renderedLayerCount -ne 3 -or
-        -not $threeLayersVisible -or
+        $renderedLayerCount -ne 4 -or
+        -not $fourLayersVisible -or
         -not $layerPositionsSynchronized -or
-        $missingPortalRegionFrameCount -ne 0 -or
         $colorKeyPortalWindowCount -ne 0 -or
-        $invalidAlphaLayeredFrameCount -ne 0 -or
         $missingPortalWindowFrameCount -ne 0 -or
         $invalidCompositeFrameCount -ne 0 -or
         -not $performanceWithinBudget) {
@@ -562,7 +615,7 @@ finally {
         $portalProcess.WaitForExit(2000) | Out-Null
     }
 
-    foreach ($process in @($shallowProcess, $middleProcess, $deepProcess)) {
+    foreach ($process in @($shallowProcess, $middleProcess, $deepProcess, $deepestProcess)) {
         if ($process -and -not $process.HasExited) {
             $process.CloseMainWindow() | Out-Null
             $process.WaitForExit(2000) | Out-Null

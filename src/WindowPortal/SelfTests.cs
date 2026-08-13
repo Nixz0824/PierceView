@@ -54,6 +54,58 @@ internal static class SelfTests
                    local == new NativeMethods.Point(2040, 1100);
         }, failures, ref total);
 
+        Check("多层固定位置探测参数", () =>
+        {
+            var options = PortalOptions.Parse(
+                ["--multilayer-probe-hwnd", "0x1234"]);
+            return options.ProbeWindow == 0x1234 && options.MultilayerProbe;
+        }, failures, ref total);
+
+        Check("多层来源按 Z-order 截止到四层", () =>
+        {
+            var portal = new NativeMethods.Rect(100, 100, 500, 400);
+            var candidates = Enumerable.Range(1, 6)
+                .Select(index => new MultilayerWindowResolver.WindowCandidate(
+                    index,
+                    new NativeMethods.Rect(100, 100, 500, 400),
+                    IsVisible: true,
+                    IsMinimized: false,
+                    IsCloaked: false,
+                    IsToolWindow: false,
+                    IsChildWindow: false));
+            var selected = MultilayerWindowResolver.SelectCandidates(
+                candidates,
+                portal);
+            return selected.Select(candidate => candidate.Handle)
+                .SequenceEqual(new nint[] { 1, 2, 3, 4 });
+        }, failures, ref total);
+
+        Check("多层来源过滤不可见与不相交窗口", () =>
+        {
+            var portal = new NativeMethods.Rect(100, 100, 500, 400);
+            var candidates = new[]
+            {
+                new MultilayerWindowResolver.WindowCandidate(
+                    1, new NativeMethods.Rect(0, 0, 50, 50),
+                    true, false, false, false, false),
+                new MultilayerWindowResolver.WindowCandidate(
+                    2, portal, true, true, false, false, false),
+                new MultilayerWindowResolver.WindowCandidate(
+                    3, portal, true, false, true, false, false),
+                new MultilayerWindowResolver.WindowCandidate(
+                    4, portal, true, false, false, true, false),
+                new MultilayerWindowResolver.WindowCandidate(
+                    5, portal, true, false, false, false, true),
+                new MultilayerWindowResolver.WindowCandidate(
+                    6, new NativeMethods.Rect(450, 350, 700, 600),
+                    true, false, false, false, false),
+            };
+            var selected = MultilayerWindowResolver.SelectCandidates(
+                candidates,
+                portal);
+            return selected.Count == 1 && selected[0].Handle == 6;
+        }, failures, ref total);
+
         Check(
             "十六进制窗口句柄",
             () => PortalOptions.ParseWindowHandle("0x1234") == 0x1234,

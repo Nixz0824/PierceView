@@ -25,7 +25,7 @@ internal sealed class PortalRuntime : IDisposable
             _thread = new Thread(() => Run(geometry, pollMilliseconds))
             {
                 IsBackground = true,
-                Name = "PierceView single-layer runtime"
+                Name = "PierceView multilayer runtime"
             };
             _thread.SetApartmentState(ApartmentState.STA);
             _thread.Start();
@@ -74,6 +74,17 @@ internal sealed class PortalRuntime : IDisposable
 
     private void Run(PortalGeometry geometry, int pollMilliseconds)
     {
+        // 2.3 alpha intentionally exposes one fixed rectangle only. Existing
+        // circle settings remain stored for the stable 2.2 application but do
+        // not change this experimental multi-window compositor.
+        if (geometry.Shape != PortalShape.Rectangle)
+        {
+            geometry = PortalGeometry.Rectangle(
+                UserSettings.DefaultRectangleWidth,
+                UserSettings.DefaultRectangleHeight,
+                UserSettings.DefaultFeatherWidth);
+        }
+
         using var controller = new WindowRegionController(geometry);
         using var visualOverlay = new AdaptivePortalOverlay(geometry);
         using var highResolutionWaiter = new HighResolutionWaiter();
@@ -112,6 +123,8 @@ internal sealed class PortalRuntime : IDisposable
                         // 避免两者分别停在抓帧前/后的两个位置。
                         if (!visualOverlay.TryUpdate(cursor, out var visualError))
                         {
+                            visualOverlay.Hide();
+                            controller.Restore();
                             if (!visualWarningShown)
                             {
                                 ErrorOccurred?.Invoke(visualError ?? "视觉来源暂不可用。");
@@ -136,9 +149,12 @@ internal sealed class PortalRuntime : IDisposable
                     else if (!TryUpdateVisualPortal(
                                  controller,
                                  visualOverlay,
+                                 geometry,
                                  cursor,
                                  out var visualError))
                     {
+                        visualOverlay.Hide();
+                        controller.Restore();
                         if (!visualWarningShown)
                         {
                             ErrorOccurred?.Invoke(visualError ?? "视觉来源暂不可用。");
@@ -203,6 +219,7 @@ internal sealed class PortalRuntime : IDisposable
     private static bool TryUpdateVisualPortal(
         WindowRegionController controller,
         AdaptivePortalOverlay visualOverlay,
+        PortalGeometry geometry,
         NativeMethods.Point screenPoint,
         out string? error)
     {
@@ -211,18 +228,17 @@ internal sealed class PortalRuntime : IDisposable
             return visualOverlay.TryUpdate(screenPoint, out error);
         }
 
-        var sourceChild = NativeMethods.WindowFromPoint(screenPoint);
-        var sourceWindow = sourceChild == nint.Zero
-            ? nint.Zero
-            : NativeMethods.GetAncestor(sourceChild, NativeMethods.GaRoot);
-        if (sourceWindow == nint.Zero || sourceWindow == controller.ActiveWindow)
+        var sources = MultilayerWindowResolver.Resolve(
+            controller.ActiveWindow,
+            geometry.CreateFrameBounds(screenPoint));
+        if (sources.Count == 0)
         {
-            error = "没有识别到宿主窗口下方的单层视觉来源。";
+            error = "没有识别到宿主窗口后方与矩形透视区域相交的前四层窗口。";
             return false;
         }
 
         return visualOverlay.TryShow(
-            sourceWindow,
+            sources,
             controller.ActiveWindow,
             screenPoint,
             out error);
