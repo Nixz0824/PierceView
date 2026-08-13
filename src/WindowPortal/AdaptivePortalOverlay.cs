@@ -11,7 +11,6 @@ internal sealed class AdaptivePortalOverlay : IDisposable
     private ActiveBackend activeBackend;
     private nint activeSourceWindow;
     private nint protectedWindow;
-    private int activeSourceCount;
 
     internal AdaptivePortalOverlay(PortalGeometry geometry)
     {
@@ -57,6 +56,13 @@ internal sealed class AdaptivePortalOverlay : IDisposable
     {
         ActiveBackend.Gpu => gpuOverlay?.DisplayPlacementCount ?? 0,
         ActiveBackend.Cpu => cpuOverlay.DisplayRelocationCount,
+        _ => 0,
+    };
+
+    internal int BackgroundPromotionCount => activeBackend switch
+    {
+        ActiveBackend.Gpu => gpuOverlay?.BackgroundPromotionCount ?? 0,
+        ActiveBackend.Cpu => cpuOverlay.BackgroundPromotionCount,
         _ => 0,
     };
 
@@ -132,7 +138,6 @@ internal sealed class AdaptivePortalOverlay : IDisposable
         }
 
         activeSourceWindow = sources[0].Handle;
-        activeSourceCount = sources.Count;
         this.protectedWindow = protectedWindow;
         string? gpuError = null;
         if (gpuOverlay is not null &&
@@ -206,6 +211,38 @@ internal sealed class AdaptivePortalOverlay : IDisposable
         }
     }
 
+    internal bool TryPromoteSource(nint sourceWindow, out string? error)
+    {
+        if (activeBackend == ActiveBackend.Gpu && gpuOverlay is not null)
+        {
+            if (!gpuOverlay.TryPromoteSource(sourceWindow, out error))
+            {
+                return false;
+            }
+
+            activeSourceWindow = sourceWindow;
+            return true;
+        }
+
+        if (activeBackend == ActiveBackend.Cpu && sourceWindow == activeSourceWindow)
+        {
+            error = null;
+            return true;
+        }
+
+        error = "深层窗口提升仅在多层 GPU 会话中可用。";
+        return false;
+    }
+
+    internal bool ContainsSourceWindow(nint sourceWindow) =>
+        activeBackend switch
+        {
+            ActiveBackend.Gpu =>
+                gpuOverlay?.ContainsSourceWindow(sourceWindow) == true,
+            ActiveBackend.Cpu => sourceWindow == activeSourceWindow,
+            _ => false,
+        };
+
     internal void Hide()
     {
         gpuOverlay?.Hide();
@@ -213,7 +250,6 @@ internal sealed class AdaptivePortalOverlay : IDisposable
         activeBackend = ActiveBackend.None;
         activeSourceWindow = nint.Zero;
         protectedWindow = nint.Zero;
-        activeSourceCount = 0;
     }
 
     public void Dispose()

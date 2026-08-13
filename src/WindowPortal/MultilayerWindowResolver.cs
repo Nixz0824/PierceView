@@ -85,6 +85,31 @@ internal static class MultilayerWindowResolver
         first.Top < second.Bottom &&
         first.Bottom > second.Top;
 
+    internal static IReadOnlyList<T> PromoteToFront<T>(
+        IReadOnlyList<T> frontToBack,
+        T selected)
+    {
+        var selectedIndex = -1;
+        var comparer = EqualityComparer<T>.Default;
+        for (var index = 0; index < frontToBack.Count; index++)
+        {
+            if (comparer.Equals(frontToBack[index], selected))
+            {
+                selectedIndex = index;
+                break;
+            }
+        }
+        if (selectedIndex <= 0)
+        {
+            return frontToBack.ToArray();
+        }
+
+        var reordered = frontToBack.ToList();
+        reordered.RemoveAt(selectedIndex);
+        reordered.Insert(0, selected);
+        return reordered;
+    }
+
     private static bool TryCreateCandidate(
         nint window,
         out WindowCandidate candidate)

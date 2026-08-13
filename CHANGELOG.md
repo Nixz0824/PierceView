@@ -6,6 +6,15 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 ## [Unreleased]
 
+### 2.3.0-multilayer-alpha.2 (local experimental build)
+
+- 新增可见深层窗口的受限 Z-order 提升：真实左键按下时识别 Windows 实际命中的已捕获窗口，只把它移动为宿主正后方的新 `-1`，绝不越过宿主到桌面最前面；其他后台来源保持相对顺序后移。
+- Add constrained Z-order promotion for visible deep windows. On a real left-button press, resolve the captured window actually hit by Windows and move it only to the new `-1` slot directly behind the host—never above the host—while preserving the relative order of the other background sources.
+- GPU 合成来源同步采用相同顺序，提升后无需重建 WGC 会话或移动 DirectComposition 显示 HWND；真实点击、滚轮和拖放继续由 Windows 原生分发。
+- Reorder the GPU compositor sources in the same way without rebuilding WGC sessions or moving the DirectComposition display HWND. Windows continues to dispatch native click, wheel, and drag input.
+- 四层来源在整个 F8 会话期间都获得可恢复的 `WS_EX_NOACTIVATE` 保护；松开 F8、暂停或退出时恢复每个窗口的原始样式。
+- Apply restorable `WS_EX_NOACTIVATE` protection to all four captured sources for the full F8 session, restoring every original style on release, pause, or exit.
+
 ### 2.3.0-multilayer-alpha.1 (local experimental build)
 
 - 基于 2.2.0 稳定 GPU 管线新增矩形多窗口遮挡重建：按真实屏幕位置和 Z-order 同时组合宿主后方 `-1` 至 `-4`，超过 `-4` 不识别；最终仍只使用一张固定 DirectComposition 显示层并且每轮只提交一次。

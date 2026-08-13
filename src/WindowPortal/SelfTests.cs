@@ -61,6 +61,15 @@ internal static class SelfTests
             return options.ProbeWindow == 0x1234 && options.MultilayerProbe;
         }, failures, ref total);
 
+        Check("深层点击提升探测参数", () =>
+        {
+            var options = PortalOptions.Parse(
+                ["--promotion-probe-hwnd", "0x1234"]);
+            return options.ProbeWindow == 0x1234 &&
+                   options.PromotionProbe &&
+                   !options.MultilayerProbe;
+        }, failures, ref total);
+
         Check("多层来源按 Z-order 截止到四层", () =>
         {
             var portal = new NativeMethods.Rect(100, 100, 500, 400);
@@ -104,6 +113,20 @@ internal static class SelfTests
                 candidates,
                 portal);
             return selected.Count == 1 && selected[0].Handle == 6;
+        }, failures, ref total);
+
+        Check("深层来源提升为新 -1 且其余层顺序不变", () =>
+        {
+            var initial = new nint[] { 1, 2, 3, 4 };
+            var reordered = MultilayerWindowResolver.PromoteToFront(
+                initial,
+                (nint)3);
+            var returned = MultilayerWindowResolver.PromoteToFront(
+                reordered,
+                (nint)1);
+            return reordered.SequenceEqual(new nint[] { 3, 1, 2, 4 }) &&
+                   returned.SequenceEqual(new nint[] { 1, 3, 2, 4 }) &&
+                   initial.SequenceEqual(new nint[] { 1, 2, 3, 4 });
         }, failures, ref total);
 
         Check(

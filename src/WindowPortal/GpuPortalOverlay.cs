@@ -358,7 +358,7 @@ internal sealed class GpuPortalOverlay : IDisposable
         }
 
         if (!foregroundGuard.TryEnable(
-                sources[0].Handle,
+                sources.Select(source => source.Handle).ToArray(),
                 protectedWindow,
                 screenCenter,
                 geometry.GuardRadius,
@@ -858,6 +858,53 @@ internal sealed class GpuPortalOverlay : IDisposable
             Texture = null;
             Session.Dispose();
             FramePool.Dispose();
+        }
+    }
+
+    internal bool TryPromoteSource(nint sourceWindow, out string? error)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        lock (gpuLock)
+        {
+            if (!active || captureSources.All(source => source.Window != sourceWindow))
+            {
+                error = "鼠标命中的窗口不属于当前多层 GPU 会话。";
+                return false;
+            }
+        }
+
+        if (!foregroundGuard.TryPromoteSource(sourceWindow, out error))
+        {
+            return false;
+        }
+
+        lock (gpuLock)
+        {
+            var sourceIndex = captureSources.FindIndex(
+                source => source.Window == sourceWindow);
+            if (sourceIndex > 0)
+            {
+                var promotedSource = captureSources[sourceIndex];
+                var reordered = MultilayerWindowResolver.PromoteToFront(
+                    captureSources,
+                    promotedSource);
+                captureSources.Clear();
+                captureSources.AddRange(reordered);
+                SourceWindow = sourceWindow;
+                Interlocked.Increment(ref latestCaptureSerial);
+            }
+        }
+
+        error = null;
+        return true;
+    }
+
+    internal bool ContainsSourceWindow(nint sourceWindow)
+    {
+        lock (gpuLock)
+        {
+            return active && captureSources.Any(
+                source => source.Window == sourceWindow);
         }
     }
 

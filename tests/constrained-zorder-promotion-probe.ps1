@@ -259,7 +259,7 @@ try {
 
     $portalProcess = Start-Process `
         -FilePath $portalPath `
-        -ArgumentList @('--probe-hwnd', "0x$($ChatGptWindow.ToString('X'))", '--probe-duration-ms', '300') `
+        -ArgumentList @('--promotion-probe-hwnd', "0x$($ChatGptWindow.ToString('X'))", '--probe-duration-ms', '1800') `
         -WindowStyle Hidden `
         -PassThru `
         -RedirectStandardOutput $portalOutput `
@@ -291,7 +291,9 @@ try {
     $clickX = $centerX + 120
     $clickY = $centerY
     [ConstrainedZOrderProbeNative]::SetCursorPos($clickX, $clickY) | Out-Null
+    Start-Sleep -Milliseconds 35
     [ConstrainedZOrderProbeNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 35
     [ConstrainedZOrderProbeNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 250
 
@@ -301,6 +303,20 @@ try {
     $deepStyleDuring = [ConstrainedZOrderProbeNative]::GetWindowLongPtr($deepWindow, -20)
     $deepTitle = [ConstrainedZOrderProbeNative]::ReadTitle($deepWindow)
     $shallowTitle = [ConstrainedZOrderProbeNative]::ReadTitle($shallowWindow)
+
+    # The original -1 now has an exposed area on the left. Click it to prove
+    # the same session can exchange the first two background slots repeatedly.
+    $returnClickX = $centerX - 240
+    [ConstrainedZOrderProbeNative]::SetCursorPos($returnClickX, $clickY) | Out-Null
+    Start-Sleep -Milliseconds 35
+    [ConstrainedZOrderProbeNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 35
+    [ConstrainedZOrderProbeNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 250
+    $foregroundAfterReturnClick = [ConstrainedZOrderProbeNative]::GetForegroundWindow()
+    $belowChatAfterReturnClick = [ConstrainedZOrderProbeNative]::GetVisibleWindow($chatGpt, 2)
+    $deepTitleAfterReturn = [ConstrainedZOrderProbeNative]::ReadTitle($deepWindow)
+    $shallowTitleAfterReturn = [ConstrainedZOrderProbeNative]::ReadTitle($shallowWindow)
 
     $portalProcess.WaitForExit()
     $portalExitCode = $portalProcess.ExitCode
@@ -323,7 +339,7 @@ try {
     $shallowStyleAfter = [ConstrainedZOrderProbeNative]::GetWindowLongPtr($shallowWindow, -20)
     $deepStyleAfter = [ConstrainedZOrderProbeNative]::GetWindowLongPtr($deepWindow, -20)
     $deepClickForwarded = $deepTitle -like '*Clicks: 1*'
-    $shallowNotClicked = $shallowTitle -notlike '*Clicks:*'
+    $shallowNotClicked = $shallowTitle -like '*Clicks: 0*'
     $foregroundPreserved = $foregroundAfterClick -eq $chatGpt
     $promotedDirectlyBelow = $belowChatAfterClick -eq $deepWindow
     $originalShallowShiftedBack = [ConstrainedZOrderProbeNative]::IsAbove(
@@ -335,6 +351,10 @@ try {
         $shallowStyleAfter -eq $shallowStyleBefore -and
         $deepStyleAfter -eq $deepStyleBefore
     $promotionGuardTriggered = $promotionCount -ge 1
+    $returnedShallowDirectlyBelow = $belowChatAfterReturnClick -eq $shallowWindow
+    $secondClickForwarded = $shallowTitleAfterReturn -like '*Clicks: 1*'
+    $deepNotClickedTwice = $deepTitleAfterReturn -like '*Clicks: 1*'
+    $foregroundPreservedAfterReturn = $foregroundAfterReturnClick -eq $chatGpt
 
     Write-Output "PORTAL_EXIT=$portalExitCode"
     Write-Output "CHATGPT_HWND=0x$($chatGpt.ToInt64().ToString('X'))"
@@ -355,6 +375,10 @@ try {
     Write-Output "STYLES_RESTORED=$stylesRestored"
     Write-Output "FOREGROUND_RECOVERY_COUNT=$foregroundRecoveryCount"
     Write-Output "PROMOTION_COUNT=$promotionCount"
+    Write-Output "RETURNED_SHALLOW_DIRECTLY_BELOW=$returnedShallowDirectlyBelow"
+    Write-Output "SECOND_CLICK_FORWARDED=$secondClickForwarded"
+    Write-Output "DEEP_NOT_CLICKED_TWICE=$deepNotClickedTwice"
+    Write-Output "FOREGROUND_PRESERVED_AFTER_RETURN=$foregroundPreservedAfterReturn"
 
     if ($portalExitCode -ne 0 -or
         -not $deepClickForwarded -or
@@ -365,7 +389,12 @@ try {
         -not $shallowNoActivateApplied -or
         -not $deepNoActivateApplied -or
         -not $stylesRestored -or
-        -not $promotionGuardTriggered) {
+        -not $promotionGuardTriggered -or
+        -not $returnedShallowDirectlyBelow -or
+        -not $secondClickForwarded -or
+        -not $deepNotClickedTwice -or
+        -not $foregroundPreservedAfterReturn -or
+        $promotionCount -lt 2) {
         throw 'The constrained Z-order promotion probe failed.'
     }
 }

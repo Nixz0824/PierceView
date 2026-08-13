@@ -89,6 +89,7 @@ internal sealed class PortalRuntime : IDisposable
         using var visualOverlay = new AdaptivePortalOverlay(geometry);
         using var highResolutionWaiter = new HighResolutionWaiter();
         var wasActivationHeld = false;
+        var wasPrimaryButtonHeld = false;
         var visualWarningShown = false;
         try
         {
@@ -96,6 +97,12 @@ internal sealed class PortalRuntime : IDisposable
             {
                 var loopStartedAt = Stopwatch.GetTimestamp();
                 var activationHeld = NativeMethods.IsKeyDown(NativeMethods.VkF8);
+                var primaryButtonState = NativeMethods.GetAsyncKeyState(
+                    NativeMethods.VkLButton);
+                var primaryButtonHeld = (primaryButtonState & 0x8000) != 0;
+                var primaryButtonPressed =
+                    (primaryButtonState & 0x0001) != 0 ||
+                    (primaryButtonHeld && !wasPrimaryButtonHeld);
 
                 if (activationHeld && !wasActivationHeld)
                 {
@@ -139,6 +146,10 @@ internal sealed class PortalRuntime : IDisposable
                                 visualOverlay.Hide();
                                 ErrorOccurred?.Invoke(regionError ?? "无法移动透视区域。");
                             }
+                            else if (primaryButtonPressed)
+                            {
+                                TryPromoteWindowAtPoint(visualOverlay, cursor);
+                            }
                         }
                     }
                     else if (!controller.Update(cursor, out var regionError))
@@ -179,6 +190,7 @@ internal sealed class PortalRuntime : IDisposable
                 }
 
                 wasActivationHeld = activationHeld;
+                wasPrimaryButtonHeld = primaryButtonHeld;
                 var targetLoopMilliseconds =
                     activationHeld
                         ? Math.Min(
@@ -242,5 +254,21 @@ internal sealed class PortalRuntime : IDisposable
             controller.ActiveWindow,
             screenPoint,
             out error);
+    }
+
+    private static void TryPromoteWindowAtPoint(
+        AdaptivePortalOverlay visualOverlay,
+        NativeMethods.Point screenPoint)
+    {
+        var hitWindow = NativeMethods.WindowFromPoint(screenPoint);
+        var hitRoot = hitWindow == nint.Zero
+            ? nint.Zero
+            : NativeMethods.GetAncestor(hitWindow, NativeMethods.GaRoot);
+        if (hitRoot == nint.Zero || !visualOverlay.ContainsSourceWindow(hitRoot))
+        {
+            return;
+        }
+
+        _ = visualOverlay.TryPromoteSource(hitRoot, out _);
     }
 }

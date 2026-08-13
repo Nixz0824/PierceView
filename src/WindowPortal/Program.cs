@@ -81,7 +81,11 @@ internal static class Program
 
         if (options.ProbeWindow is { } probeWindow)
         {
-            return RunProbeMode(options, probeWindow, options.MultilayerProbe);
+            return RunProbeMode(
+                options,
+                probeWindow,
+                options.MultilayerProbe || options.PromotionProbe,
+                options.PromotionProbe);
         }
 
         return RunTrayApplication(options);
@@ -137,7 +141,8 @@ internal static class Program
     private static int RunProbeMode(
         PortalOptions options,
         nint probeWindow,
-        bool multilayerProbe)
+        bool multilayerProbe,
+        bool promotionProbe)
     {
         var geometry = PortalGeometry.Rectangle(
             UserSettings.DefaultRectangleWidth,
@@ -154,7 +159,8 @@ internal static class Program
             probeWindow,
             options.ProbeDurationMilliseconds,
             options.Radius,
-            movePortal: !multilayerProbe);
+            movePortal: !multilayerProbe,
+            reportPromotion: promotionProbe);
     }
 
     private static int RunProbe(
@@ -164,7 +170,8 @@ internal static class Program
         nint window,
         int durationMilliseconds,
         int radius,
-        bool movePortal)
+        bool movePortal,
+        bool reportPromotion)
     {
         Console.WriteLine($"开始探测窗口 0x{window:X}。");
         Console.WriteLine($"前台核对：当前前台 HWND=0x{NativeMethods.GetForegroundWindow():X}。");
@@ -236,7 +243,10 @@ internal static class Program
                 result = 4;
             }
 
-            Thread.Sleep(500);
+            if (movePortal)
+            {
+                Thread.Sleep(500);
+            }
 
             if (result == 0 && movePortal)
             {
@@ -315,15 +325,43 @@ internal static class Program
             if (result == 0 && !movePortal)
             {
                 var frameTimes = new List<double>(100);
+                var wasPrimaryButtonHeld = false;
                 for (var frame = 0; frame < 100; frame++)
                 {
+                    var updatePoint = reportPromotion &&
+                                      NativeMethods.GetCursorPos(out var currentCursor)
+                        ? currentCursor
+                        : center;
                     var frameStartedAt = Stopwatch.GetTimestamp();
-                    if (!visualOverlay.TryUpdate(center, out var updateError))
+                    if (!visualOverlay.TryUpdate(updatePoint, out var updateError))
                     {
                         Console.Error.WriteLine("多层固定位置刷新失败：" + updateError);
                         result = 6;
                         break;
                     }
+
+                    var committedCenter = visualOverlay.LastPresentedCenter ?? updatePoint;
+                    if (!controller.Update(committedCenter, out var followRegionError))
+                    {
+                        Console.Error.WriteLine("多层固定位置交互孔刷新失败：" + followRegionError);
+                        result = 3;
+                        break;
+                    }
+
+                    var primaryButtonState = NativeMethods.GetAsyncKeyState(
+                        NativeMethods.VkLButton);
+                    var primaryButtonHeld = (primaryButtonState & 0x8000) != 0;
+                    var primaryButtonPressed =
+                        (primaryButtonState & 0x0001) != 0 ||
+                        (primaryButtonHeld && !wasPrimaryButtonHeld);
+                    if (reportPromotion && primaryButtonPressed)
+                    {
+                        TryPromoteWindowAtPoint(
+                            visualOverlay,
+                            updatePoint);
+                    }
+
+                    wasPrimaryButtonHeld = primaryButtonHeld;
 
                     frameTimes.Add(
                         Stopwatch.GetElapsedTime(frameStartedAt).TotalMilliseconds);
@@ -342,6 +380,11 @@ internal static class Program
             {
                 Thread.Sleep(durationMilliseconds);
                 Console.WriteLine($"前台焦点守卫：回滚次数={visualOverlay.ForegroundRecoveryCount}。");
+                if (reportPromotion)
+                {
+                    Console.WriteLine(
+                        $"受限层级提升：次数={visualOverlay.BackgroundPromotionCount}。");
+                }
             }
         }
         finally
@@ -385,6 +428,22 @@ internal static class Program
             controller.ActiveWindow,
             screenPoint,
             out error);
+    }
+
+    private static void TryPromoteWindowAtPoint(
+        AdaptivePortalOverlay visualOverlay,
+        NativeMethods.Point screenPoint)
+    {
+        var hitWindow = NativeMethods.WindowFromPoint(screenPoint);
+        var hitRoot = hitWindow == nint.Zero
+            ? nint.Zero
+            : NativeMethods.GetAncestor(hitWindow, NativeMethods.GaRoot);
+        if (hitRoot == nint.Zero || !visualOverlay.ContainsSourceWindow(hitRoot))
+        {
+            return;
+        }
+
+        _ = visualOverlay.TryPromoteSource(hitRoot, out _);
     }
 
     private static bool WaitForVisualReadiness(
@@ -480,6 +539,7 @@ internal static class Program
             "  PierceView [--radius <像素>] [--poll-ms <毫秒>]\n" +
             "  PierceView --probe-hwnd <句柄> [--probe-duration-ms <毫秒>] [--radius <像素>]\n" +
             "  PierceView --multilayer-probe-hwnd <句柄> [--probe-duration-ms <毫秒>]\n" +
+            "  PierceView --promotion-probe-hwnd <句柄> [--probe-duration-ms <毫秒>]\n" +
             "  PierceView --self-test\n" +
             "  PierceView --visual-smoke [--radius <像素>]\n" +
             "  PierceView --gpu-probe\n" +
@@ -497,6 +557,7 @@ internal static class Program
             "  --poll-ms             鼠标轮询间隔，默认 16，范围 8..100\n" +
             "  --probe-hwnd          对指定十进制或 0x 十六进制 HWND 做短暂探测\n" +
             "  --multilayer-probe-hwnd  固定矩形位置验证最多四层同时合成\n" +
+            "  --promotion-probe-hwnd  固定矩形位置验证深层点击受限提升\n" +
             "  --probe-duration-ms   探测持续时间，默认 1500\n" +
             "  --self-test           运行无需桌面窗口的纯逻辑自检\n" +
             "  --visual-smoke        自动视觉冒烟（采样圆形、矩形、羽化与闪黑回归）\n" +

@@ -4,9 +4,9 @@ using System.Runtime.InteropServices;
 namespace WindowPortal;
 
 /// <summary>
-/// Keeps the single visible source behind the protected host without scanning,
-/// promoting, or switching to deeper windows. Recovery is queued away from the
-/// DWM render thread so a click cannot synchronously block frame capture.
+/// Keeps all captured sources non-activating and behind the protected host.
+/// A selected captured source may be promoted only to the slot directly behind
+/// the host; it can never cross the host into the desktop foreground.
 /// </summary>
 internal sealed class ForegroundZOrderGuard : IDisposable
 {
@@ -23,7 +23,8 @@ internal sealed class ForegroundZOrderGuard : IDisposable
     private nint _eventHook;
     private nint _protectedWindow;
     private nint _sourceWindow;
-    private uint _sourceProcessId;
+    private nint[] _sourceWindows = [];
+    private uint[] _sourceProcessIds = [];
     private bool _restoringForeground;
     private nint _pendingForegroundWindow;
     private int _recoveryQueued;
@@ -35,10 +36,25 @@ internal sealed class ForegroundZOrderGuard : IDisposable
 
     internal int RecoveryCount { get; private set; }
 
-    internal int PromotionCount => 0;
+    internal int PromotionCount { get; private set; }
 
     internal bool TryEnable(
         nint sourceWindow,
+        nint protectedWindow,
+        NativeMethods.Point portalCenter,
+        int portalRadius,
+        out string? error)
+    {
+        return TryEnable(
+            [sourceWindow],
+            protectedWindow,
+            portalCenter,
+            portalRadius,
+            out error);
+    }
+
+    internal bool TryEnable(
+        IReadOnlyList<nint> sourceWindows,
         nint protectedWindow,
         NativeMethods.Point portalCenter,
         int portalRadius,
@@ -48,29 +64,44 @@ internal sealed class ForegroundZOrderGuard : IDisposable
         _ = portalRadius;
         Restore();
         RecoveryCount = 0;
+        PromotionCount = 0;
 
-        if (!NativeMethods.IsWindow(sourceWindow) || !NativeMethods.IsWindow(protectedWindow))
+        var distinctSources = sourceWindows
+            .Where(window => window != nint.Zero)
+            .Distinct()
+            .ToArray();
+        if (distinctSources.Length == 0 ||
+            distinctSources.Any(window => !NativeMethods.IsWindow(window)) ||
+            !NativeMethods.IsWindow(protectedWindow))
         {
-            error = "无法建立单层窗口守卫：来源窗口或宿主窗口不可用。";
+            error = "无法建立多层窗口守卫：来源窗口或宿主窗口不可用。";
             return false;
         }
 
-        if (!_interactionGuard.TryAdd(sourceWindow, out error))
+        var processIds = new List<uint>(distinctSources.Length);
+        foreach (var source in distinctSources)
         {
-            Restore();
-            return false;
-        }
+            if (!_interactionGuard.TryAdd(source, out error))
+            {
+                Restore();
+                return false;
+            }
 
-        NativeMethods.GetWindowThreadProcessId(sourceWindow, out _sourceProcessId);
-        if (_sourceProcessId == 0)
-        {
-            error = "无法识别透视来源窗口的进程。";
-            Restore();
-            return false;
+            NativeMethods.GetWindowThreadProcessId(source, out var processId);
+            if (processId == 0)
+            {
+                error = "无法识别透视来源窗口的进程。";
+                Restore();
+                return false;
+            }
+
+            processIds.Add(processId);
         }
 
         _protectedWindow = protectedWindow;
-        _sourceWindow = sourceWindow;
+        _sourceWindows = distinctSources;
+        _sourceProcessIds = processIds.Distinct().ToArray();
+        _sourceWindow = distinctSources[0];
         _eventHook = NativeMethods.SetWinEventHook(
             EventSystemForeground,
             EventSystemForeground,
@@ -89,6 +120,59 @@ internal sealed class ForegroundZOrderGuard : IDisposable
 
         error = null;
         return true;
+    }
+
+    internal bool TryPromoteSource(nint sourceWindow, out string? error)
+    {
+        var root = NativeMethods.GetAncestor(sourceWindow, NativeMethods.GaRoot);
+        if (root == nint.Zero)
+        {
+            root = sourceWindow;
+        }
+
+        lock (_recoveryGate)
+        {
+            if (_eventHook == nint.Zero || !NativeMethods.IsWindow(_protectedWindow))
+            {
+                error = "多层窗口守卫尚未启用。";
+                return false;
+            }
+
+            if (!_sourceWindows.Contains(root) || !NativeMethods.IsWindow(root))
+            {
+                error = "鼠标命中的窗口不属于本次 F8 会话锁定的前四层来源。";
+                return false;
+            }
+
+            _sourceWindow = root;
+            if (GetFirstVisibleWindowBehindHost() == root)
+            {
+                error = null;
+                return true;
+            }
+
+            if (!NativeMethods.SetWindowPos(
+                    root,
+                    _protectedWindow,
+                    0,
+                    0,
+                    0,
+                    0,
+                    NativeMethods.SwpNoMove |
+                    NativeMethods.SwpNoSize |
+                    NativeMethods.SwpNoActivate |
+                    NativeMethods.SwpNoOwnerZOrder))
+            {
+                error = Win32Error(
+                    "无法把选中的深层窗口移动到宿主后方",
+                    Marshal.GetLastPInvokeError());
+                return false;
+            }
+
+            PromotionCount++;
+            error = null;
+            return true;
+        }
     }
 
     internal void UpdatePortalGeometry(NativeMethods.Point center, int radius)
@@ -126,7 +210,8 @@ internal sealed class ForegroundZOrderGuard : IDisposable
             _interactionGuard.Restore();
             _protectedWindow = nint.Zero;
             _sourceWindow = nint.Zero;
-            _sourceProcessId = 0;
+            _sourceWindows = [];
+            _sourceProcessIds = [];
             _pendingForegroundWindow = nint.Zero;
             _restoringForeground = false;
         }
@@ -372,7 +457,24 @@ internal sealed class ForegroundZOrderGuard : IDisposable
         }
 
         NativeMethods.GetWindowThreadProcessId(window, out var processId);
-        return processId != 0 && processId == _sourceProcessId;
+        return processId != 0 && _sourceProcessIds.Contains(processId);
+    }
+
+    private nint GetFirstVisibleWindowBehindHost()
+    {
+        for (var window = NativeMethods.GetWindow(
+                 _protectedWindow,
+                 NativeMethods.GwHwndNext);
+             window != nint.Zero;
+             window = NativeMethods.GetWindow(window, NativeMethods.GwHwndNext))
+        {
+            if (NativeMethods.IsWindowVisible(window))
+            {
+                return window;
+            }
+        }
+
+        return nint.Zero;
     }
 
     private static string Win32Error(string message, int error) =>

@@ -9,6 +9,7 @@ internal sealed record PortalOptions(
     bool PollWasSpecified,
     nint? ProbeWindow,
     bool MultilayerProbe,
+    bool PromotionProbe,
     nint? InspectWindow,
     NativeMethods.Point? InspectPoint,
     int ProbeDurationMilliseconds,
@@ -30,6 +31,7 @@ internal sealed record PortalOptions(
         var pollWasSpecified = false;
         nint? probeWindow = null;
         var multilayerProbe = false;
+        var promotionProbe = false;
         nint? inspectWindow = null;
         NativeMethods.Point? inspectPoint = null;
         var probeDurationMilliseconds = 1500;
@@ -62,6 +64,10 @@ internal sealed record PortalOptions(
                 case "--multilayer-probe-hwnd":
                     probeWindow = ParseWindowHandle(NextValue(args, ref index, argument));
                     multilayerProbe = true;
+                    break;
+                case "--promotion-probe-hwnd":
+                    probeWindow = ParseWindowHandle(NextValue(args, ref index, argument));
+                    promotionProbe = true;
                     break;
                 case "--inspect-hwnd":
                     inspectWindow = ParseWindowHandle(NextValue(args, ref index, argument));
@@ -145,6 +151,7 @@ internal sealed record PortalOptions(
             pollWasSpecified,
             probeWindow,
             multilayerProbe,
+            promotionProbe,
             inspectWindow,
             inspectPoint,
             probeDurationMilliseconds,

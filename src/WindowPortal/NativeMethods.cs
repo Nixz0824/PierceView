@@ -141,6 +141,7 @@ internal static class NativeMethods
 	}
 
 	internal const int VkF8 = 119;
+	internal const int VkLButton = 1;
 
 	private static readonly nint DpiAwarenessContextPerMonitorAwareV2 = new IntPtr(-4);
 

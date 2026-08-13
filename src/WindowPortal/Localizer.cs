@@ -81,7 +81,7 @@ internal sealed record UiText(
         "寸镜 / PierceView 帮助",
         "按住 F8：在固定圆角矩形中同时查看当前窗口后方最多四层普通应用（-1 至 -4）；超过 -4 不识别。\n" +
         "松开 F8：立即关闭透视并恢复当前窗口。\n\n" +
-        "本 alpha 只验证多层视觉与性能：真实点击、滚轮和拖放仍只按 Windows 当前命中的最前一层工作，深层点击排序尚未加入。若 GPU 多层捕获失败，会安全回退为单层 CPU 透视。\n\n" +
+        "点击矩形中实际可见的深层窗口时，它会成为宿主后的新 -1；其他后台窗口按原顺序后移，但宿主始终保持最前。真实点击、滚轮和拖放仍由 Windows 原生处理。若 GPU 多层捕获失败，会安全回退为单层 CPU 透视。\n\n" +
         "矩形支持自动圆角和羽化；鼠标中心仍位于完全穿透区域。游戏、反作弊、受保护视频、系统界面和无重定向窗口可能只有点击、没有画面。启动游戏前请从托盘完全退出寸镜。",
         "暂时无法透视",
         "请确认鼠标下方存在普通桌面应用，并避开游戏、受保护内容和系统界面。",
@@ -116,7 +116,7 @@ internal sealed record UiText(
         "PierceView Help",
         "Hold F8: simultaneously view up to four ordinary windows behind the current window (-1 through -4) in one fixed rounded rectangle. Layers beyond -4 are ignored.\n" +
         "Release F8: close the portal and restore the current window immediately.\n\n" +
-        "This alpha validates multi-layer visuals and performance only. Native click, wheel, and drag still follow the frontmost window Windows currently hits; deep-layer click reordering is not included yet. If multi-source GPU capture fails, PierceView safely falls back to the single-layer CPU renderer.\n\n" +
+        "Click a visible deep window in the rectangle to make it the new -1 directly behind the host. Other background windows shift back in their existing order, while the host always remains in front. Windows still handles native click, wheel, and drag input. If multi-source GPU capture fails, PierceView safely falls back to the single-layer CPU renderer.\n\n" +
         "The rectangle supports automatic rounded corners and feathering while keeping the pointer center fully open. Games, anti-cheat software, protected video, system UI, and no-redirection windows may accept clicks without showing an image. Fully exit PierceView before starting a game.",
         "Portal unavailable",
         "Make sure a standard desktop app is under the cursor. Avoid games, protected content, and system UI.",
