@@ -59,6 +59,30 @@ internal sealed class AdaptivePortalOverlay : IDisposable
         _ => 0,
     };
 
+    internal bool HasPresentedFrame => activeBackend switch
+    {
+        ActiveBackend.Gpu => (gpuOverlay?.PresentedFrames ?? 0) > 0,
+        ActiveBackend.Cpu => cpuOverlay.IsVisible,
+        _ => false,
+    };
+
+    internal bool IsSourceNoActivateApplied
+    {
+        get
+        {
+            var sourceWindow = SourceWindow;
+            if (sourceWindow == nint.Zero || !NativeMethods.IsWindow(sourceWindow))
+            {
+                return false;
+            }
+
+            var extendedStyle = NativeMethods.GetWindowLongPtr(
+                sourceWindow,
+                NativeMethods.GwlExStyle);
+            return (extendedStyle.ToInt64() & NativeMethods.WsExNoActivate) != 0;
+        }
+    }
+
     internal nint SourceWindow => activeBackend switch
     {
         ActiveBackend.Gpu => gpuOverlay?.SourceWindow ?? nint.Zero,

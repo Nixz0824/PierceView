@@ -193,6 +193,23 @@ internal static class Program
                 result = 6;
             }
 
+            if (result == 0 &&
+                !WaitForVisualReadiness(
+                    visualOverlay,
+                    center,
+                    TimeSpan.FromSeconds(3),
+                    out visualError))
+            {
+                Console.Error.WriteLine("视觉穿透就绪失败：" + visualError);
+                result = 6;
+            }
+
+            Console.WriteLine(
+                $"视觉就绪：后端={visualOverlay.ActiveBackendName}，" +
+                $"首帧已提交={visualOverlay.HasPresentedFrame}，" +
+                $"来源HWND=0x{visualOverlay.SourceWindow:X}，" +
+                $"来源非激活={visualOverlay.IsSourceNoActivateApplied}。");
+
             var centerInspection = controller.InspectCurrentHole(center);
             Console.WriteLine(
                 $"中心探测：区域类型={centerInspection.RegionType}，" +
@@ -325,6 +342,39 @@ internal static class Program
             controller.ActiveWindow,
             screenPoint,
             out error);
+    }
+
+    private static bool WaitForVisualReadiness(
+        AdaptivePortalOverlay visualOverlay,
+        NativeMethods.Point screenPoint,
+        TimeSpan timeout,
+        out string? error)
+    {
+        var deadline = Stopwatch.GetTimestamp() +
+                       (long)(timeout.TotalSeconds * Stopwatch.Frequency);
+        while (Stopwatch.GetTimestamp() < deadline)
+        {
+            if (!visualOverlay.TryUpdate(screenPoint, out error))
+            {
+                return false;
+            }
+
+            if (visualOverlay.HasPresentedFrame &&
+                visualOverlay.IsSourceNoActivateApplied)
+            {
+                error = null;
+                return true;
+            }
+
+            Thread.Sleep(10);
+        }
+
+        error =
+            $"等待首帧或来源窗口非激活样式超时（后端={visualOverlay.ActiveBackendName}，" +
+            $"首帧={visualOverlay.HasPresentedFrame}，" +
+            $"来源HWND=0x{visualOverlay.SourceWindow:X}，" +
+            $"非激活={visualOverlay.IsSourceNoActivateApplied}）。";
+        return false;
     }
 
     private static void RegisterEmergencyRestoration(

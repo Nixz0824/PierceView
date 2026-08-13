@@ -27,6 +27,19 @@ public static class WindowPortalProbeNative
         public int Bottom;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Point
+    {
+        public int X;
+        public int Y;
+
+        public Point(int x, int y)
+        {
+            X = x;
+            Y = y;
+        }
+    }
+
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool IsWindow(IntPtr window);
@@ -58,6 +71,12 @@ public static class WindowPortalProbeNative
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetWindow(IntPtr window, uint command);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(Point point);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr window, uint flags);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     public static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
@@ -123,6 +142,17 @@ public static class WindowPortalProbeNative
 
         return candidate;
     }
+
+    public static IntPtr GetVisibleWindowBelow(IntPtr window)
+    {
+        IntPtr candidate = GetWindow(window, 2);
+        while (candidate != IntPtr.Zero && !IsWindowVisible(candidate))
+        {
+            candidate = GetWindow(candidate, 2);
+        }
+
+        return candidate;
+    }
 }
 '@
 
@@ -145,6 +175,7 @@ $diagnosticDirectory = Join-Path $workspace 'artifacts\diagnostics'
 New-Item -ItemType Directory -Force -Path $diagnosticDirectory | Out-Null
 $portalOutput = Join-Path $diagnosticDirectory 'nonactivating-click-probe.log'
 $portalError = Join-Path $diagnosticDirectory 'nonactivating-click-probe.error.log'
+$expectedProbeStart = "开始探测窗口 0x$($ChatGptWindow.ToString('X'))。"
 $targetProcess = $null
 $portalProcess = $null
 
@@ -180,23 +211,41 @@ try {
         throw 'Could not position the test target directly behind ChatGPT.'
     }
 
-    [WindowPortalProbeNative]::SwitchToThisWindow($chatGpt, $true)
-    [WindowPortalProbeNative]::ForceForeground($chatGpt) | Out-Null
-    [WindowPortalProbeNative]::SetWindowPos(
-        $targetProcess.MainWindowHandle,
-        $chatGpt,
-        $chatRect.Left,
-        $centerY - [int]($targetHeight / 2),
-        $targetWidth,
-        $targetHeight,
-        $positionFlags) | Out-Null
-    Start-Sleep -Milliseconds 150
-    $foregroundBefore = [WindowPortalProbeNative]::GetForegroundWindow()
+    $foregroundReady = $false
+    $foregroundBefore = [IntPtr]::Zero
+    $windowBelowHost = [IntPtr]::Zero
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        [WindowPortalProbeNative]::SwitchToThisWindow($chatGpt, $true)
+        [WindowPortalProbeNative]::ForceForeground($chatGpt) | Out-Null
+        [WindowPortalProbeNative]::SetWindowPos(
+            $targetProcess.MainWindowHandle,
+            $chatGpt,
+            $chatRect.Left,
+            $centerY - [int]($targetHeight / 2),
+            $targetWidth,
+            $targetHeight,
+            $positionFlags) | Out-Null
+        Start-Sleep -Milliseconds 25
+        $foregroundBefore = [WindowPortalProbeNative]::GetForegroundWindow()
+        $windowBelowHost = [WindowPortalProbeNative]::GetVisibleWindowBelow($chatGpt)
+        if ($foregroundBefore -eq $chatGpt -and
+            $windowBelowHost -eq $targetProcess.MainWindowHandle) {
+            $foregroundReady = $true
+            break
+        }
+    }
+
+    if (-not $foregroundReady) {
+        throw "The test desktop did not settle (foreground=0x$($foregroundBefore.ToInt64().ToString('X')), host=0x$($chatGpt.ToInt64().ToString('X')), below=0x$($windowBelowHost.ToInt64().ToString('X')), target=0x$($targetProcess.MainWindowHandle.ToInt64().ToString('X')))."
+    }
+
     $windowAboveBefore = [WindowPortalProbeNative]::GetVisibleWindowAbove($targetProcess.MainWindowHandle)
     $extendedStyleBefore = [WindowPortalProbeNative]::GetWindowLongPtr($targetProcess.MainWindowHandle, -20)
-    if ($foregroundBefore -ne $chatGpt) {
-        throw "ChatGPT could not be made foreground before the test (foreground=0x$($foregroundBefore.ToInt64().ToString('X')))."
-    }
+
+    # Redirected output files can retain the previous probe briefly while a new
+    # single-file process is extracting and starting. Remove them first and bind
+    # every readiness match to this run's host HWND.
+    Remove-Item -LiteralPath $portalOutput, $portalError -Force -ErrorAction SilentlyContinue
 
     $portalProcess = Start-Process `
         -FilePath $portalPath `
@@ -206,25 +255,56 @@ try {
         -RedirectStandardOutput $portalOutput `
         -RedirectStandardError $portalError
 
-    $centerFrameReady = $false
-    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+    $visualReady = $false
+    $readyBackend = ''
+    $readyFirstFrame = $false
+    $readySourceWindow = [IntPtr]::Zero
+    $readyNoActivate = $false
+    for ($attempt = 0; $attempt -lt 200; $attempt++) {
         Start-Sleep -Milliseconds 25
         if (Test-Path -LiteralPath $portalOutput) {
             $logText = [string](Get-Content -LiteralPath $portalOutput -Raw)
-            if ($logText -like '*中心探测：*') {
-                $centerFrameReady = $true
+            if ($logText -notlike "*$expectedProbeStart*") {
+                continue
+            }
+
+            $readyMatch = [regex]::Match(
+                $logText,
+                '视觉就绪：后端=([^，]+)，首帧已提交=(True|False)，来源HWND=0x([0-9A-Fa-f]+)，来源非激活=(True|False)')
+            if ($readyMatch.Success) {
+                $readyBackend = $readyMatch.Groups[1].Value
+                $readyFirstFrame = [bool]::Parse($readyMatch.Groups[2].Value)
+                $readySourceWindow = [IntPtr]::new(
+                    [Convert]::ToInt64($readyMatch.Groups[3].Value, 16))
+                $readyNoActivate = [bool]::Parse($readyMatch.Groups[4].Value)
+                $visualReady = $readyBackend -eq 'GPU/WGC' -and
+                    $readyFirstFrame -and
+                    $readySourceWindow -eq $targetProcess.MainWindowHandle -and
+                    $readyNoActivate
                 break
             }
         }
     }
 
-    if (-not $centerFrameReady) {
-        throw 'The portal did not reach its stable center frame in time.'
+    if (-not $visualReady) {
+        throw "The GPU portal did not become ready for the expected source (backend=$readyBackend, firstFrame=$readyFirstFrame, source=0x$($readySourceWindow.ToInt64().ToString('X')), target=0x$($targetProcess.MainWindowHandle.ToInt64().ToString('X')), noActivate=$readyNoActivate)."
     }
 
     $extendedStyleDuring = [WindowPortalProbeNative]::GetWindowLongPtr($targetProcess.MainWindowHandle, -20)
 
     [WindowPortalProbeNative]::SetCursorPos($centerX, $centerY) | Out-Null
+    $hitAtClick = [WindowPortalProbeNative]::WindowFromPoint(
+        [WindowPortalProbeNative+Point]::new($centerX, $centerY))
+    $hitRootAtClick = if ($hitAtClick -eq [IntPtr]::Zero) {
+        [IntPtr]::Zero
+    }
+    else {
+        [WindowPortalProbeNative]::GetAncestor($hitAtClick, 2)
+    }
+    if ($hitRootAtClick -ne $targetProcess.MainWindowHandle) {
+        throw "The portal center does not hit the expected target before input (hit=0x$($hitRootAtClick.ToInt64().ToString('X')), target=0x$($targetProcess.MainWindowHandle.ToInt64().ToString('X')))."
+    }
+
     [WindowPortalProbeNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
     [WindowPortalProbeNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 50
@@ -271,6 +351,11 @@ try {
     Write-Output "TARGET_HWND=0x$($targetProcess.MainWindowHandle.ToInt64().ToString('X'))"
     Write-Output "TARGET_TITLE=$targetTitle"
     Write-Output "HOST_TITLE=$hostTitle"
+    Write-Output "READY_BACKEND=$readyBackend"
+    Write-Output "READY_FIRST_FRAME=$readyFirstFrame"
+    Write-Output "READY_SOURCE_HWND=0x$($readySourceWindow.ToInt64().ToString('X'))"
+    Write-Output "READY_NO_ACTIVATE=$readyNoActivate"
+    Write-Output "CLICK_HIT_HWND=0x$($hitRootAtClick.ToInt64().ToString('X'))"
     Write-Output "FOREGROUND_BEFORE=0x$($foregroundBefore.ToInt64().ToString('X'))"
     Write-Output "FOREGROUND_AFTER=0x$($foregroundAfter.ToInt64().ToString('X'))"
     Write-Output "CLICK_FORWARDED=$clickForwarded"

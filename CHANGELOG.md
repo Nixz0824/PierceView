@@ -8,6 +8,8 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 ### GPU development / GPU 开发
 
+- `2.2.0-gpu-alpha.2` 为独立交互回归增加本轮宿主绑定与可靠就绪握手：确认 GPU 首帧已提交、实际来源 HWND 正确、`WS_EX_NOACTIVATE` 已应用且点击位置命中预期目标后才发送真实鼠标输入，避免单文件启动期间读取旧日志或桌面前台未稳定造成误报。
+- In `2.2.0-gpu-alpha.2`, bind each independent interaction regression to its current host and wait for a reliable readiness handshake: the first GPU frame must be presented, the captured source HWND must match, `WS_EX_NOACTIVATE` must be active, and the click point must hit the expected target before native mouse input is sent. This prevents stale logs and an unsettled desktop during single-file startup from being reported as product failures.
 - `2.2.0-gpu-alpha.1` 从公开的 2.1.0 CPU 终版重新建立 GPU 开发线，保留固定 CPU 显示层、单轮单次提交、32 像素交互孔与 16 像素锚定阈值作为回退基线。
 - Rebase `2.2.0-gpu-alpha.1` on the public 2.1.0 CPU final build, preserving its fixed CPU display surface, one presentation per update, 32 px input aperture, and 16 px anchoring threshold as the fallback baseline.
 - GPU 的 WGC → D3D11 → HLSL → DirectComposition 路径改为一次 F8 会话只定位一次虚拟屏幕顶层 HWND；鼠标移动只更新 portal-sized viewport 和着色器坐标，移除 192 像素小画布的跨界移动与旧位置闪现来源。

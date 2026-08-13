@@ -10,8 +10,6 @@ internal sealed class NonActivatingWindowGuard : IDisposable
 {
 	private readonly record struct GuardedWindowState(uint ProcessId, nint OriginalExtendedStyle, bool ChangedStyle);
 
-	private const long WsExNoActivate = 134217728L;
-
 	private readonly Dictionary<nint, GuardedWindowState> _windows = new Dictionary<nint, GuardedWindowState>();
 
 	internal int Count => _windows.Count;
@@ -53,10 +51,11 @@ internal sealed class NonActivatingWindowGuard : IDisposable
 			error = Win32Error("无法读取后台窗口的扩展样式", lastPInvokeError);
 			return false;
 		}
-		bool flag = (((IntPtr)windowLongPtr).ToInt64() & 0x8000000) == 0;
+		bool flag = (((IntPtr)windowLongPtr).ToInt64() & NativeMethods.WsExNoActivate) == 0;
 		if (flag)
 		{
-			nint newValue = new IntPtr(((IntPtr)windowLongPtr).ToInt64() | 0x8000000);
+			nint newValue = new IntPtr(
+				((IntPtr)windowLongPtr).ToInt64() | NativeMethods.WsExNoActivate);
 			Marshal.SetLastPInvokeError(0);
 			nint num = NativeMethods.SetWindowLongPtr(window, -20, newValue);
 			int lastPInvokeError2 = Marshal.GetLastPInvokeError();

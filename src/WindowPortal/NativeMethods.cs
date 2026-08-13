@@ -68,6 +68,7 @@ internal static class NativeMethods
 	internal const int GwlStyle = -16;
 
 	internal const int GwlExStyle = -20;
+	internal const long WsExNoActivate = 0x08000000L;
 
 	internal const uint DwmwaCloaked = 14u;
 
