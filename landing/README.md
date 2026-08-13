@@ -1,4 +1,4 @@
-# 寸镜介绍页 v6
+# 寸镜介绍页 v7 / PierceView landing v7
 
 ## 布局对齐
 
@@ -16,9 +16,11 @@
 
 ## F8 演示（对齐产品主路径）
 
-- 按住 `F8`/`空格`：圆洞  
-- 圆内：**观察、选中文字、点击按钮、滚动长页面**  
+- 按住 `F8`/`空格`：圆角矩形透视框 / rounded rectangular portal
+- 框内：**观察、选中文字、点击按钮、滚动长页面** / view, select, click, and scroll
 - **仅图片**可拖到投放区，松开 F8 投放  
+
+页面演示仍使用一张可交互参考页，产品文字与下载入口已同步到 2.3 GPU 版本的“最多四层、深层提升、输入同步与动态补位”。The interactive page remains a simple one-page demo, while product copy and downloads describe the 2.3 GPU Edition's four-layer reconstruction, deep-window promotion, input synchronization, and dynamic backfill.
 
 ## 预览
 

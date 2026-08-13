@@ -23,6 +23,7 @@ internal sealed class GpuPortalOverlay : IDisposable
     private const int MaximumCanvasDimension = 16_384;
     private const int OrderSwitchMaximumHoldMilliseconds = 8;
     private const int SourceReconciliationMilliseconds = 75;
+    private const int TransientInvalidSourceProbeThreshold = 3;
 
     private const string ShaderSource = """
         cbuffer PortalParameters : register(b0)
@@ -74,6 +75,8 @@ internal sealed class GpuPortalOverlay : IDisposable
                 {
                     float2 uv = (sourcePixel + 0.5) / SourceData3.zw;
                     color = SourceTexture3.SampleLevel(PointSampler, uv, 0.0);
+                    color.rgb = color.a > 0.001 ? color.rgb / color.a : 0.0;
+                    color.a = 1.0;
                 }
             }
             if (ShapeData.z >= 3.0)
@@ -84,7 +87,9 @@ internal sealed class GpuPortalOverlay : IDisposable
                 {
                     float2 uv = (sourcePixel + 0.5) / SourceData2.zw;
                     sampled = SourceTexture2.SampleLevel(PointSampler, uv, 0.0);
-                    color = sampled + color * (1.0 - sampled.a);
+                    sampled.rgb = sampled.a > 0.001 ? sampled.rgb / sampled.a : 0.0;
+                    sampled.a = 1.0;
+                    color = sampled;
                 }
             }
             if (ShapeData.z >= 2.0)
@@ -95,7 +100,9 @@ internal sealed class GpuPortalOverlay : IDisposable
                 {
                     float2 uv = (sourcePixel + 0.5) / SourceData1.zw;
                     sampled = SourceTexture1.SampleLevel(PointSampler, uv, 0.0);
-                    color = sampled + color * (1.0 - sampled.a);
+                    sampled.rgb = sampled.a > 0.001 ? sampled.rgb / sampled.a : 0.0;
+                    sampled.a = 1.0;
+                    color = sampled;
                 }
             }
             if (ShapeData.z >= 1.0)
@@ -106,7 +113,9 @@ internal sealed class GpuPortalOverlay : IDisposable
                 {
                     float2 uv = (sourcePixel + 0.5) / SourceData.zw;
                     sampled = SourceTexture0.SampleLevel(PointSampler, uv, 0.0);
-                    color = sampled + color * (1.0 - sampled.a);
+                    sampled.rgb = sampled.a > 0.001 ? sampled.rgb / sampled.a : 0.0;
+                    sampled.a = 1.0;
+                    color = sampled;
                 }
             }
             float signedDistance;
@@ -142,6 +151,7 @@ internal sealed class GpuPortalOverlay : IDisposable
     private readonly int canvasHeight;
     private readonly GpuDeviceResources resources;
     private readonly PortalGpuForm form;
+    private readonly nint displayWindow;
     private readonly IDXGISwapChain1 swapChain;
     private readonly ID3D11Texture2D backBuffer;
     private readonly ID3D11RenderTargetView renderTarget;
@@ -151,6 +161,7 @@ internal sealed class GpuPortalOverlay : IDisposable
     private readonly ID3D11Buffer parameterBuffer;
     private readonly IDCompositionTarget compositionTarget;
     private readonly IDCompositionVisual compositionVisual;
+    private readonly IDCompositionRectangleClip compositionClip;
     private readonly ForegroundZOrderGuard foregroundGuard = new();
     private readonly WindowOwnerGuard ownerGuard = new();
     private readonly System.Threading.Timer foregroundHeartbeat;
@@ -175,8 +186,9 @@ internal sealed class GpuPortalOverlay : IDisposable
     private int sourceReplacementCount;
     private nint protectedWindow;
     private volatile bool active;
-    private bool windowShown;
+    private volatile bool windowShown;
     private bool disposed;
+    private int displayZOrderRecoveryCount;
     private int recoverableCaptureFailureCount;
     private int recoverableUpdateFailureCount;
     private int sourceReconciliationRetryCount;
@@ -209,6 +221,7 @@ internal sealed class GpuPortalOverlay : IDisposable
                     if (active)
                     {
                         foregroundGuard.EnsurePreserved();
+                        EnsureDisplayAboveProtected();
                     }
                 }
                 catch
@@ -220,7 +233,7 @@ internal sealed class GpuPortalOverlay : IDisposable
             Timeout.Infinite,
             Timeout.Infinite);
         form = new PortalGpuForm(canvasWidth, canvasHeight);
-        _ = form.Handle;
+        displayWindow = form.Handle;
 
         using var adapter = resources.DxgiDevice.GetAdapter();
         using var factory = adapter.GetParent<IDXGIFactory2>();
@@ -284,6 +297,12 @@ internal sealed class GpuPortalOverlay : IDisposable
             .CheckError();
         compositionVisual = resources.CompositionDevice.CreateVisual();
         compositionVisual.SetContent(swapChain).CheckError();
+        compositionClip = resources.CompositionDevice.CreateRectangleClip();
+        compositionClip.SetLeft(0f).CheckError();
+        compositionClip.SetTop(0f).CheckError();
+        compositionClip.SetRight(0f).CheckError();
+        compositionClip.SetBottom(0f).CheckError();
+        compositionVisual.SetClip(compositionClip).CheckError();
         compositionTarget.SetRoot(compositionVisual).CheckError();
         resources.CompositionDevice.Commit().CheckError();
     }
@@ -333,6 +352,14 @@ internal sealed class GpuPortalOverlay : IDisposable
          currentPromotedSourceFrameSerial <=
          orderStartPromotedSourceFrameSerial);
 
+    internal static bool ShouldReconcileInvalidSource(
+        bool windowExists,
+        bool minimized,
+        int consecutiveInvalidProbeCount) =>
+        !windowExists ||
+        minimized ||
+        consecutiveInvalidProbeCount >= TransientInvalidSourceProbeThreshold;
+
     internal long CapturedFrames => Interlocked.Read(ref latestCaptureSerial);
 
     internal long PresentedFrames => Interlocked.Read(ref presentedFrames);
@@ -340,6 +367,14 @@ internal sealed class GpuPortalOverlay : IDisposable
     internal NativeMethods.Point? LastPresentedCenter => lastPresentedCenter;
 
     internal int DisplayPlacementCount => Volatile.Read(ref displayPlacementCount);
+
+    internal int DisplayZOrderRecoveryCount =>
+        Volatile.Read(ref displayZOrderRecoveryCount);
+
+    internal bool IsDisplayAboveProtected =>
+        !active ||
+        !windowShown ||
+        IsWindowAbove(displayWindow, protectedWindow);
 
     internal int SourceReconciliationCount =>
         Volatile.Read(ref sourceReconciliationCount);
@@ -355,6 +390,7 @@ internal sealed class GpuPortalOverlay : IDisposable
 
     internal int SourceReconciliationRetryCount =>
         Volatile.Read(ref sourceReconciliationRetryCount);
+
 
     internal IReadOnlyList<nint> SourceWindows
     {
@@ -468,6 +504,7 @@ internal sealed class GpuPortalOverlay : IDisposable
             pendingOrderSourceFrameSerial = 0;
             pendingOrderDeadlineTimestamp = 0;
             displayPlacementCount = 0;
+            displayZOrderRecoveryCount = 0;
             sourceReconciliationCount = 0;
             sourceReplacementCount = 0;
             recoverableCaptureFailureCount = 0;
@@ -540,6 +577,7 @@ internal sealed class GpuPortalOverlay : IDisposable
 
         foregroundGuard.UpdatePortalGeometry(screenCenter, geometry.GuardRadius);
         foregroundGuard.EnsurePreserved();
+        EnsureDisplayAboveProtected();
         lock (gpuLock)
         {
             if (captureSources.Count == 0)
@@ -680,6 +718,17 @@ internal sealed class GpuPortalOverlay : IDisposable
                 resources.Context.PSUnsetShaderResource(checked((uint)index));
             }
             resources.Context.UnsetRenderTargets();
+            // Clip at the DirectComposition visual as well as in HLSL. The
+            // transparent pixels outside this rectangle no longer depend on a
+            // full-screen layered HWND keeping its alpha state across DWM
+            // style/ownership transitions.
+            compositionClip.SetLeft(localFrameLeft).CheckError();
+            compositionClip.SetTop(localFrameTop).CheckError();
+            compositionClip.SetRight(
+                localFrameLeft + geometry.FrameWidth).CheckError();
+            compositionClip.SetBottom(
+                localFrameTop + geometry.FrameHeight).CheckError();
+            resources.CompositionDevice.Commit().CheckError();
             swapChain.Present(0, PresentFlags.None).CheckError();
             Interlocked.Increment(ref presentedFrames);
 
@@ -705,6 +754,7 @@ internal sealed class GpuPortalOverlay : IDisposable
             }
 
             windowShown = true;
+            EnsureDisplayAboveProtected();
             lastPresentedCenter = screenCenter;
             lastPresentedSourceBounds = sourceBounds;
             presentedCaptureSerial = captureSerial;
@@ -719,6 +769,73 @@ internal sealed class GpuPortalOverlay : IDisposable
 
         error = null;
         return true;
+    }
+
+    private void EnsureDisplayAboveProtected()
+    {
+        if (!active || !windowShown)
+        {
+            return;
+        }
+
+        var host = protectedWindow;
+        var display = displayWindow;
+        if (!NativeMethods.IsWindow(display) ||
+            !NativeMethods.IsWindow(host) ||
+            IsWindowAbove(display, host))
+        {
+            return;
+        }
+
+        // Reinsert the owned display immediately above its protected host.
+        // This never activates either window, keeps unrelated always-on-top
+        // applications above the F8 session, and does not disturb the
+        // protected host/source ordering maintained by ForegroundZOrderGuard.
+        if (NativeMethods.SetWindowPos(
+                display,
+                host,
+                0,
+                0,
+                0,
+                0,
+                NativeMethods.SwpNoMove |
+                NativeMethods.SwpNoSize |
+                NativeMethods.SwpNoActivate |
+                NativeMethods.SwpNoOwnerZOrder))
+        {
+            Interlocked.Increment(ref displayZOrderRecoveryCount);
+        }
+    }
+
+    internal static bool IsWindowAbove(nint candidate, nint reference)
+    {
+        if (candidate == nint.Zero ||
+            reference == nint.Zero ||
+            candidate == reference ||
+            !NativeMethods.IsWindow(candidate) ||
+            !NativeMethods.IsWindow(reference))
+        {
+            return false;
+        }
+
+        // GW_HWNDPREV walks toward the front of the global top-level Z-order.
+        // A bounded walk also protects the heartbeat from a malformed chain.
+        var inspected = 0;
+        for (var window = NativeMethods.GetWindow(
+                 reference,
+                 NativeMethods.GwHwndPrevious);
+             window != nint.Zero && inspected < 16_384;
+             window = NativeMethods.GetWindow(
+                 window,
+                 NativeMethods.GwHwndPrevious), inspected++)
+        {
+            if (window == candidate)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     internal void Hide()
@@ -806,6 +923,7 @@ internal sealed class GpuPortalOverlay : IDisposable
         renderTarget.Dispose();
         backBuffer.Dispose();
         compositionVisual.Dispose();
+        compositionClip.Dispose();
         compositionTarget.Dispose();
         swapChain.Dispose();
         form.Dispose();
@@ -995,6 +1113,9 @@ internal sealed class GpuPortalOverlay : IDisposable
 
         internal long FrameSerial { get; set; }
 
+        internal int ConsecutiveInvalidProbeCount { get; set; }
+
+
         internal static CaptureSource Create(
             nint window,
             IDirect3DDevice captureDevice)
@@ -1071,12 +1192,24 @@ internal sealed class GpuPortalOverlay : IDisposable
             currentSources = captureSources.ToArray();
         }
 
-        var invalidCurrentSources = currentSources
-            .Where(source =>
-                !MultilayerWindowResolver.IsEligibleSessionSource(
-                    source.Window))
-            .Select(source => source.Window)
-            .ToHashSet();
+        var invalidCurrentSources = new HashSet<nint>();
+        foreach (var source in currentSources)
+        {
+            if (MultilayerWindowResolver.IsEligibleSessionSource(source.Window))
+            {
+                source.ConsecutiveInvalidProbeCount = 0;
+                continue;
+            }
+
+            source.ConsecutiveInvalidProbeCount++;
+            if (ShouldReconcileInvalidSource(
+                    NativeMethods.IsWindow(source.Window),
+                    NativeMethods.IsIconic(source.Window),
+                    source.ConsecutiveInvalidProbeCount))
+            {
+                invalidCurrentSources.Add(source.Window);
+            }
+        }
         if (invalidCurrentSources.Count == 0)
         {
             // Physical promotion deliberately changes the captured Z-order.
@@ -1252,6 +1385,11 @@ internal sealed class GpuPortalOverlay : IDisposable
                 // unrelated fallback foreground window. Re-assert the F8 host
                 // after the source set and its physical -1 are synchronized.
                 foregroundGuard.RestoreProtectedForegroundAfterSourceRemoval();
+            }
+
+            else
+            {
+                foregroundGuard.EnsurePreserved();
             }
 
             error = null;

@@ -139,6 +139,26 @@ internal static class SelfTests
             return reconciled.SequenceEqual(new nint[] { 3, 1, 4, 5 });
         }, failures, ref total);
 
+        Check("动态来源忽略单次可见性抖动", () =>
+        {
+            return !GpuPortalOverlay.ShouldReconcileInvalidSource(
+                       windowExists: true,
+                       minimized: false,
+                       consecutiveInvalidProbeCount: 1) &&
+                   GpuPortalOverlay.ShouldReconcileInvalidSource(
+                       windowExists: true,
+                       minimized: false,
+                       consecutiveInvalidProbeCount: 3) &&
+                   GpuPortalOverlay.ShouldReconcileInvalidSource(
+                       windowExists: false,
+                       minimized: false,
+                       consecutiveInvalidProbeCount: 1) &&
+                   GpuPortalOverlay.ShouldReconcileInvalidSource(
+                       windowExists: true,
+                       minimized: true,
+                       consecutiveInvalidProbeCount: 1);
+        }, failures, ref total);
+
         Check("置顶宿主保持普通来源在非置顶窗口带", () =>
         {
             var host = (nint)0x1234;
@@ -154,6 +174,46 @@ internal static class SelfTests
                        host,
                        protectedIsTopmost: false,
                        sourceIsTopmost: false) == host;
+        }, failures, ref total);
+
+        Check("来源守卫按窗口家族而非共享进程匹配", () =>
+        {
+            var host = (nint)0x100;
+            var explorerFolder = (nint)0x200;
+            var explorerChild = (nint)0x201;
+            var explorerOwnedPopup = (nint)0x202;
+            var taskbarFromSameProcess = (nint)0x300;
+            var sources = new nint[] { explorerFolder };
+            return ForegroundZOrderGuard.BelongsToCapturedWindowFamily(
+                       explorerFolder,
+                       explorerFolder,
+                       explorerFolder,
+                       sources,
+                       host) &&
+                   ForegroundZOrderGuard.BelongsToCapturedWindowFamily(
+                       explorerChild,
+                       explorerFolder,
+                       explorerFolder,
+                       sources,
+                       host) &&
+                   ForegroundZOrderGuard.BelongsToCapturedWindowFamily(
+                       explorerOwnedPopup,
+                       explorerOwnedPopup,
+                       explorerFolder,
+                       sources,
+                       host) &&
+                   !ForegroundZOrderGuard.BelongsToCapturedWindowFamily(
+                       taskbarFromSameProcess,
+                       taskbarFromSameProcess,
+                       taskbarFromSameProcess,
+                       sources,
+                       host) &&
+                   !ForegroundZOrderGuard.BelongsToCapturedWindowFamily(
+                       host,
+                       host,
+                       host,
+                       sources,
+                       host);
         }, failures, ref total);
 
         Check("深层交换等待被提升来源新帧", () =>

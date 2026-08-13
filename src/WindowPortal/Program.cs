@@ -431,6 +431,8 @@ internal static class Program
                     $"已隔离帧异常={visualOverlay.RecoverableCaptureFailureCount}，" +
                     $"已隔离更新异常={visualOverlay.RecoverableUpdateFailureCount}，" +
                     $"显示定位={visualOverlay.VisualPlacementCount}，" +
+                    $"显示层级恢复={visualOverlay.DisplayZOrderRecoveryCount}，" +
+                    $"显示层位于宿主上方={visualOverlay.IsDisplayAboveProtected}，" +
                     "最终来源=" + string.Join(
                         ',',
                         visualOverlay.SourceWindows.Select(
@@ -584,7 +586,7 @@ internal static class Program
     private static void PrintHelp()
     {
         Console.WriteLine(
-            "寸镜 / PierceView - Windows 多层窗口透视实验版\n\n" +
+            "寸镜 / PierceView - Windows 多层窗口透视工具\n\n" +
             "用法：\n" +
             "  PierceView [--radius <像素>] [--poll-ms <毫秒>]\n" +
             "  PierceView --probe-hwnd <句柄> [--probe-duration-ms <毫秒>] [--radius <像素>]\n" +
@@ -600,7 +602,7 @@ internal static class Program
             "  PierceView --version\n\n" +
             "普通运行：\n" +
             "  启动后只进入系统托盘。按住 F8 开启矩形透视，松开恢复。\n" +
-            "  实验版最多识别宿主后方 -1 到 -4 四层；超过 -4 不识别。\n" +
+            "  2.3 GPU 版本最多识别宿主后方 -1 到 -4 四层；超过 -4 不识别。\n" +
             "  从托盘菜单启动/暂停、设置、查看帮助或退出。\n\n" +
             "参数：\n" +
             "  --radius              圆半径，默认 180，范围 64..400\n" +

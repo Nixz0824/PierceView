@@ -28,7 +28,6 @@ internal sealed class ForegroundZOrderGuard : IDisposable
     private bool _protectedTopmostApplied;
     private nint _sourceWindow;
     private nint[] _sourceWindows = [];
-    private uint[] _sourceProcessIds = [];
     private bool _restoringForeground;
     private nint _pendingForegroundWindow;
     private int _recoveryQueued;
@@ -102,7 +101,6 @@ internal sealed class ForegroundZOrderGuard : IDisposable
             return false;
         }
 
-        var processIds = new List<uint>(distinctSources.Length);
         foreach (var source in distinctSources)
         {
             if (!_interactionGuard.TryAdd(source, out error))
@@ -111,21 +109,11 @@ internal sealed class ForegroundZOrderGuard : IDisposable
                 return false;
             }
 
-            NativeMethods.GetWindowThreadProcessId(source, out var processId);
-            if (processId == 0)
-            {
-                error = "无法识别透视来源窗口的进程。";
-                Restore();
-                return false;
-            }
-
-            processIds.Add(processId);
         }
 
         _protectedWindow = protectedWindow;
         _protectedWindowWasTopmost = IsTopmost(protectedWindow);
         _sourceWindows = distinctSources;
-        _sourceProcessIds = processIds.Distinct().ToArray();
         _sourceWindow = distinctSources[0];
         _eventHook = NativeMethods.SetWinEventHook(
             EventSystemForeground,
@@ -281,7 +269,6 @@ internal sealed class ForegroundZOrderGuard : IDisposable
 
             var previousSources = _sourceWindows;
             var addedSources = new List<nint>();
-            var processIds = new List<uint>(distinctSources.Length);
             foreach (var source in distinctSources)
             {
                 if (!_interactionGuard.Contains(source))
@@ -299,19 +286,6 @@ internal sealed class ForegroundZOrderGuard : IDisposable
                     addedSources.Add(source);
                 }
 
-                NativeMethods.GetWindowThreadProcessId(source, out var processId);
-                if (processId == 0)
-                {
-                    foreach (var addedSource in addedSources)
-                    {
-                        _interactionGuard.TryRemove(addedSource);
-                    }
-
-                    error = "无法识别新透视来源窗口的进程。";
-                    return false;
-                }
-
-                processIds.Add(processId);
             }
 
             foreach (var previousSource in previousSources)
@@ -323,7 +297,6 @@ internal sealed class ForegroundZOrderGuard : IDisposable
             }
 
             _sourceWindows = distinctSources;
-            _sourceProcessIds = processIds.Distinct().ToArray();
             // Reconciliation follows the current physical Z-order. This also
             // selects the new real -1 when the previously selected window was
             // closed, without leaving input aimed at an older list entry.
@@ -415,7 +388,6 @@ internal sealed class ForegroundZOrderGuard : IDisposable
             _protectedTopmostApplied = false;
             _sourceWindow = nint.Zero;
             _sourceWindows = [];
-            _sourceProcessIds = [];
             _pendingForegroundWindow = nint.Zero;
             _forceProtectedForegroundDuringRecovery = 0;
             _restoringForeground = false;
@@ -770,14 +742,36 @@ internal sealed class ForegroundZOrderGuard : IDisposable
 
     private bool BelongsToSourceApplication(nint window)
     {
-        if (window == nint.Zero || window == _protectedWindow || !NativeMethods.IsWindow(window))
+        if (window == nint.Zero ||
+            window == _protectedWindow ||
+            !NativeMethods.IsWindow(window))
         {
             return false;
         }
 
-        NativeMethods.GetWindowThreadProcessId(window, out var processId);
-        return processId != 0 && _sourceProcessIds.Contains(processId);
+        var root = NativeMethods.GetAncestor(window, NativeMethods.GaRoot);
+        var rootOwner = NativeMethods.GetAncestor(
+            window,
+            NativeMethods.GaRootOwner);
+        return BelongsToCapturedWindowFamily(
+            window,
+            root,
+            rootOwner,
+            _sourceWindows,
+            _protectedWindow);
     }
+
+    internal static bool BelongsToCapturedWindowFamily(
+        nint candidate,
+        nint root,
+        nint rootOwner,
+        IReadOnlyList<nint> sourceWindows,
+        nint protectedWindow) =>
+        candidate != nint.Zero &&
+        candidate != protectedWindow &&
+        (sourceWindows.Contains(candidate) ||
+         sourceWindows.Contains(root) ||
+         sourceWindows.Contains(rootOwner));
 
     private void RestoreProtectedTopmost()
     {

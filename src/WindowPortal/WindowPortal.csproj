@@ -13,11 +13,11 @@
     <Version>2.3.0</Version>
     <AssemblyVersion>2.3.0.0</AssemblyVersion>
     <FileVersion>2.3.0.0</FileVersion>
-    <InformationalVersion>2.3.0-multilayer-alpha.7</InformationalVersion>
+    <InformationalVersion>2.3.0</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>寸镜 / PierceView</Product>
     <Company>PierceView Project</Company>
-    <Description>GPU 多窗口遮挡重建实验版；最多识别宿主后方四层窗口</Description>
+    <Description>GPU 多窗口遮挡重建托盘工具；最多识别宿主后方四层窗口</Description>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
 

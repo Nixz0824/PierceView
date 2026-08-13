@@ -6,11 +6,11 @@
 
 ![寸镜 PierceView：按住 F8 查看并操作后台窗口 / Hold F8 to view and interact with the window behind](assets/readme/hero.svg)
 
-寸镜（PierceView）是一款轻量的 Windows 系统托盘效率工具。按住 `F8`，鼠标附近会出现可选的圆角羽化矩形、圆角硬边矩形或圆形透视区域，让你不离开当前工作就能查看、滚动或点击紧贴在后方的一层窗口；松开按键，当前窗口立即恢复。
+寸镜（PierceView）是一款轻量的 Windows 系统托盘效率工具。按住 `F8`，鼠标附近会出现圆角羽化矩形透视区域：它按真实位置同时重建宿主后方最多四层窗口，让你不离开当前工作就能查看、滚动、点击或拖放可见的后台内容；松开按键，当前窗口立即恢复。
 
-PierceView is a lightweight Windows tray utility. Hold `F8` to open a selectable rounded feathered rectangle, rounded hard rectangle, or circle around the pointer, then view, scroll, or click the single window directly behind your current work. Release the key to restore the foreground window immediately.
+PierceView is a lightweight Windows tray utility. Hold `F8` to open a rounded feathered rectangular portal around the pointer. It reconstructs up to four windows behind the host at their real positions, letting you view, scroll, click, or drag visible background content without leaving your current work. Release the key to restore the foreground immediately.
 
-**当前公开版本 / Current public release:** `2.2.0 GPU Edition / GPU 版本`　|　**稳定回退版 / Stable fallback:** `2.1.0 CPU Edition / CPU 版本`
+**当前公开版本 / Current public release:** `2.3.0 GPU Edition / GPU 版本`　|　**稳定回退版 / Stable fallback:** `2.1.0 CPU Edition / CPU 版本`
 
 > **无需安装 / No installer** · **本地运行 / Local only** · **GPU 优先、CPU 自动回退 / GPU-first with automatic CPU fallback**
 
@@ -31,18 +31,27 @@ Many `Alt+Tab` trips are not real context switches—you only need a number, a s
 
 1. 把鼠标移到想查看的位置。Move the pointer to the information you want.
 2. 按住 `F8` 打开并移动透视区域。Hold `F8` to open and move the portal.
-3. 在透视区域内查看、滚动或点击后方的一层普通窗口。View, scroll, or click the ordinary window directly behind it.
+3. 查看最多四层后台窗口；点击透视框内可见的深层窗口，可把它换到当前应用正后方。View up to four background layers; click a visible deeper window to move it directly behind the current app.
 4. 松开 `F8`，关闭透视并恢复当前窗口。Release `F8` to close the portal and restore the foreground.
 
-2.2 GPU 版本在支持的 Windows 10/11 机器上优先使用 `Windows.Graphics.Capture → D3D11 常驻纹理 → HLSL 形状/羽化 → DirectComposition`。后台窗口有新内容时更新显存纹理；鼠标移动直接重裁最新纹理，不再为每一步移动重新执行 CPU 抓图和像素合成。一次 F8 会话只定位一次覆盖完整虚拟屏幕的显示层，从机制上减少旧路径闪现与整体偏移。
+### 从 2.2 到 2.3 / From 2.2 to 2.3
 
-On supported Windows 10/11 systems, the 2.2 GPU Edition prefers `Windows.Graphics.Capture → persistent D3D11 texture → HLSL shape/feathering → DirectComposition`. The source updates the GPU texture only when it has new content; pointer motion recrops the latest texture without repeating CPU capture and pixel composition. The display surface is placed once across the virtual screen for each F8 session, removing the native source of stale-path flashes and whole-surface drift.
+| 2.2.0 GPU Edition | 2.3.0 GPU Edition |
+|---|---|
+| 单层 GPU 透视 / One GPU source | 最多四层真实遮挡重建 / Up to four-layer occlusion reconstruction |
+| F8 会话固定一个来源 / One fixed source per F8 hold | 点击可见深层窗口，成为宿主后方新 `-1` / Click visible depth to make it the new `-1` behind the host |
+| 仅操作原 `-1` / Interact with the original `-1` | 点击、滚轮、拖放与新真实 `-1` 同步 / Click, wheel, and drag follow the new physical `-1` |
+| 来源关闭后会话结束或回退 / Source loss ends or falls back | 关闭/最小化后自动从更深候选补位 / Closed or minimized sources backfill automatically |
 
-![寸镜 PierceView 2.2.0 GPU 版本：显存常驻、固定合成、自动 CPU 回退与 260Hz 实测 / PierceView 2.2.0 GPU Edition: persistent texture, fixed composition, automatic CPU fallback, and 260Hz verification](assets/readme/gpu-edition-upgrade.svg)
+2.3 GPU 版本沿用 `Windows.Graphics.Capture → D3D11 常驻纹理 → HLSL 遮挡/羽化 → DirectComposition` 稳定管线，并把来源扩展为宿主后方最多 `-1` 至 `-4`。各窗口分别捕获，GPU 按真实窗口边界与 Z-order 重建遮挡，最后仍只通过一张固定显示层提交；不是把四张截图半透明叠加。
 
-GPU 不可用或会话中捕获失败时，寸镜会自动回退到 2.1.0 CPU 稳定管线；圆形、自动圆角矩形、可调羽化、静止持续刷新、真实点击/滚轮/拖放入口与前台层级保护均保留。每次 F8 仍只锁定紧贴当前窗口后的一个来源，不合成或动态切换更深层窗口。
+The 2.3 GPU Edition extends the stable `Windows.Graphics.Capture → persistent D3D11 texture → HLSL occlusion/feathering → DirectComposition` pipeline to at most layers `-1` through `-4`. Each window is captured independently, then the GPU reconstructs real bounds and Z-order before one fixed display surface is presented. It does not alpha-stack four screenshots.
 
-If GPU capture is unavailable or fails during a session, PierceView automatically falls back to the stable 2.1.0 CPU pipeline. Circles, automatically rounded rectangles, adjustable feathering, continuous refresh while stationary, native click/wheel/drag entry, and foreground-order protection remain available. Each F8 hold still locks one source directly behind the current window; deeper windows are neither composited nor switched dynamically.
+![寸镜 PierceView 2.3.0 GPU 版本：最多四层遮挡重建、深层窗口提升、输入同步与动态补位 / PierceView 2.3.0 GPU Edition: four-layer occlusion reconstruction, deep-window promotion, synchronized input, and dynamic backfill](assets/readme/gpu-edition-upgrade.svg)
+
+点击透视框内真正可见的深层窗口时，寸镜只把它提升为宿主正后方的新 `-1`，不会把它顶到桌面最前面；后续点击、滚轮和拖放会跟随新的真实输入层级。会话中关闭或最小化来源后，寸镜会从更深处自动补位，但始终不识别超过 `-4` 的窗口。GPU 不可用或会话失败时自动回退到 2.1.0 单层 CPU 稳定管线。
+
+Clicking a genuinely visible deeper window moves it only to the new `-1` slot behind the host—never above the current app. Subsequent click, wheel, and drag input follows that physical order. Closing or minimizing a source during the hold automatically backfills from deeper candidates, while anything beyond `-4` remains intentionally unsupported. If the GPU session is unavailable or fails, PierceView falls back to the stable single-layer 2.1.0 CPU pipeline.
 
 ## 下载 / Download
 
@@ -50,7 +59,7 @@ If GPU capture is unavailable or fails during a session, PierceView automaticall
 
 | 文件 / File | 用途 / Purpose | SHA256 |
 |---|---|---|
-| [PierceView-v2.2.0-gpu-win-x64.exe](../../releases/download/v2.2.0/PierceView-v2.2.0-gpu-win-x64.exe) | **推荐：GPU 优先 + CPU 自动回退 / Recommended: GPU-first + automatic CPU fallback** | `BB0E83FFA49DBE31EE3B3B711C6B397E5FBF9E3AC1F483B278B08E725CBB597E` |
+| [PierceView-v2.3.0-gpu-win-x64.exe](../../releases/download/v2.3.0/PierceView-v2.3.0-gpu-win-x64.exe) | **推荐：最多四层 GPU 透视 + CPU 自动回退 / Recommended: up to four GPU layers + automatic CPU fallback** | `7E0CA2CEC38FA5F0AC36D6E2B5AE8FC1F29679002EBF2D6720573682BEEECBF1` |
 | [PierceView-v2.1.0-cpu-win-x64.zip](../../releases/download/v2.1.0/PierceView-v2.1.0-cpu-win-x64.zip) | 推荐 CPU 下载包 / Recommended CPU package | `CCD0E3124950C5F13F6A7167662D923F6A34549CE963A37AD6A69F3B0209A0CB` |
 | [PierceView-v2.1.0-cpu-win-x64.exe](../../releases/download/v2.1.0/PierceView-v2.1.0-cpu-win-x64.exe) | CPU 单文件程序 / CPU single-file app | `122FDD80EB3888E5FB703D8D309574E6A7908EF180E5A89C862F4DB79D84D7BC` |
 
@@ -67,15 +76,17 @@ The current build is not Authenticode-signed, so Windows may show “Unknown pub
 3. 按住 `F8` 开启透视，松开恢复。Hold `F8` to open the portal; release it to restore.
 4. 双击托盘图标打开设置；右键可启动/暂停、查看帮助或退出。Double-click the tray icon for settings; right-click to start/pause, open Help, or exit.
 
-设置包含透视形状、圆形清晰区半径或矩形宽高、圆形/矩形共用的边缘羽化，以及界面语言；配置保存在 `%LOCALAPPDATA%\PierceView\settings.json`。Settings include portal shape, clear circle radius or rectangle dimensions, shared circle/rectangle edge feathering, and UI language; the configuration stays in that local file.
+设置包含透视尺寸、边缘羽化与界面语言；2.3 运行路径固定使用圆角羽化矩形，历史形状设置仍会保存在 `%LOCALAPPDATA%\PierceView\settings.json`，供旧版本继续读取。Settings include portal size, edge feathering, and UI language. The 2.3 runtime uses a rounded feathered rectangle; historical shape settings remain in the local settings file for older releases.
 
 ## 能做什么 / Features
 
-| 能力 / Capability | 2.2 GPU 版本行为 / Version 2.2 GPU Edition behavior |
+| 能力 / Capability | 2.3 GPU 版本行为 / Version 2.3 GPU Edition behavior |
 |---|---|
 | 系统托盘 / System tray | 普通启动无主窗口；提供启动/暂停、设置、帮助与退出。No persistent main window; Start/Pause, Settings, Help, and Exit live in the tray. |
-| 单层透视 / Single-layer portal | 可选羽化/硬边圆形或自动圆角矩形，显示紧贴当前窗口后的一层普通桌面窗口，并在鼠标静止时持续刷新。Choose a feathered/hard circle or automatically rounded rectangle; dynamic content keeps refreshing while the pointer is still. |
-| 后台交互 / Background interaction | 允许真实滚动与点击，并尽量保持宿主窗口前台与层级。Passes real scroll/click input while preserving the host foreground and Z-order where Windows allows it. |
+| 四层遮挡重建 / Four-layer reconstruction | 圆角羽化矩形按真实边界同时显示宿主后方最多 `-1` 至 `-4`；超过 `-4` 不识别。The rounded feathered rectangle reconstructs at most layers `-1` through `-4` at their real bounds; deeper layers are ignored. |
+| 深层窗口提升 / Deep-window promotion | 点击可见深层窗口，只把它变为宿主后方的新 `-1`，宿主保持前台。Click a visible deeper window to make it the new `-1` behind the host while the host remains foreground. |
+| 输入同步 / Input synchronization | 点击、滚轮和拖放跟随新的真实 `-1`，不只改变视觉顺序。Click, wheel, and drag follow the new physical `-1`, not merely the visual order. |
+| 动态补位 / Dynamic backfill | 会话中来源关闭或最小化后自动从更深窗口补齐，仍严格限制四层。Closed or minimized sources are replaced from deeper candidates while the four-layer limit remains strict. |
 | 跨应用拖放 / Cross-app drag-and-drop | 两端应用与权限都兼容时可用；并非所有文字、图片、文件或网页都支持。Works when both apps and privilege levels support the same native drag format. |
 | 双语界面 / Bilingual UI | 托盘、设置、首次提示与帮助支持简体中文和 English。Tray, Settings, first-run hint, and Help support Simplified Chinese and English. |
 | GPU 加速与回退 / GPU acceleration & fallback | 优先使用 WGC/D3D11/DirectComposition；不可用或失败时自动切换到 2.1.0 CPU 稳定管线。Prefers WGC/D3D11/DirectComposition and automatically switches to the stable 2.1.0 CPU pipeline if unavailable or unsuccessful. |
@@ -103,8 +114,8 @@ PierceView runs at standard-user privilege. It does not inject into processes, r
 
 ## 已知限制 / Known limitations
 
-- 羽化可明显减轻圆形硬边的阶梯感；个别 GPU/驱动或来源窗口仍可能偶发短暂黑帧或闪烁。Feathering reduces hard-circle stair-stepping; some GPU/driver or source-window combinations may still briefly black-frame or flicker.
-- 圆形使用径向 alpha 羽化，矩形沿自动圆角轮廓羽化；两者都不会模糊后台内容本身，设为 0 即恢复硬边。Circles use radial alpha feathering and rectangles follow their automatic rounded contour; neither blurs the background content itself, and 0 restores a hard edge.
+- 2.3 多层 GPU 路径固定使用圆角羽化矩形；圆形仍属于 2.1/2.2 单层路线。The 2.3 multi-layer GPU path uses a rounded feathered rectangle; circles remain part of the 2.1/2.2 single-layer line.
+- 只识别宿主后方最多四层；完全被浅层遮住、在透视框中不可见的深层窗口不能直接点击提升。Only four layers behind the host are resolved; a deeper window that is completely occluded and invisible inside the portal cannot be promoted directly.
 - 部分无重定向、受保护或特殊 GPU 表面可能只有点击、没有画面。Some no-redirection, protected, or special GPU surfaces may accept clicks without a visual.
 - 跨应用拖放依赖两端应用的原生格式与权限，并非所有场景可用。Cross-app drag-and-drop depends on native formats and privilege levels; not every app pair supports it.
 - 发布包尚未代码签名，首次运行可能被 SmartScreen 提示。The release is not code-signed; SmartScreen may prompt on first run.
@@ -133,7 +144,7 @@ dotnet .\src\WindowPortal\bin\Release\net8.0-windows10.0.19041.0\PierceView.dll 
 
 Public docs keep only what users and everyday contributors need:
 
-- [架构 / Architecture](docs/ARCHITECTURE.md) — 2.2 GPU 优先、CPU 自动回退的单层透视如何工作 / how the 2.2 GPU-first single-layer portal and automatic CPU fallback work
+- [架构 / Architecture](docs/ARCHITECTURE.md) — 2.3 四层 GPU 遮挡重建、输入同步与 CPU 回退 / 2.3 four-layer GPU reconstruction, input synchronization, and CPU fallback
 - [兼容性 / Compatibility](docs/COMPATIBILITY.md) — 适用窗口与已知边界 / supported windows and known boundaries
 - [安全模型 / Security model](docs/SECURITY.md) — 权限、能力边界与安全报告方式 / privileges, capability boundaries, and how to report issues
 - [变更记录 / Changelog](CHANGELOG.md)

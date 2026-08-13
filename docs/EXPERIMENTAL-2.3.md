@@ -1,8 +1,8 @@
-# 寸镜 / PierceView 2.3 多层实验版
+# 寸镜 / PierceView 2.3 多层开发记录
 
-`2.3.0-multilayer-alpha.7` 是从公开稳定版 `2.2.0` 独立分支开发的本地测试版本，不替代 `2.2.0 GPU Edition` 或 `2.1.0 CPU Edition`。
+本页保留从 `2.2.0` 到正式 `2.3.0 GPU Edition` 的多层开发范围与技术决策。用户使用说明请优先阅读 [README](../README.md)、[架构](ARCHITECTURE.md)和[兼容性](COMPATIBILITY.md)。
 
-`2.3.0-multilayer-alpha.7` is a local test build developed on a separate branch from the public stable `2.2.0`. It does not replace the `2.2.0 GPU Edition` or `2.1.0 CPU Edition`.
+This page preserves the multi-window development scope and technical decisions that led from `2.2.0` to the public `2.3.0 GPU Edition`. Users should prefer the [README](../README.md), [Architecture](ARCHITECTURE.md), and [Compatibility](COMPATIBILITY.md) documents.
 
 ## 本轮范围 / Scope
 
@@ -18,11 +18,15 @@
 - F8 按住期间每 75 ms 校验已捕获来源；关闭或最小化一层后，从当前最深有效来源继续向后补齐到最多四层。正常会话不会主动改动仍有效的来源名单。仍有效的捕获与纹理继续复用，新来源首帧到达前保留最后一张完整画面。Validate captured sources every 75 ms while F8 is held. If one closes or minimizes, continue behind the deepest valid source to backfill up to four layers. Normal sessions do not proactively alter a still-valid source set. Reuse valid captures and textures, and retain the last complete composition until a replacement publishes its first frame.
 - 动态补位同步更新非激活样式、前台守卫和真实输入顺序；协调器不因普通 Z-order 变化重排仍有效的来源，因此不会覆盖深层点击已经建立的有效 `-1`。Synchronize non-activating styles, foreground protection, and real input order during backfill. Ordinary Z-order changes do not reorder still-valid captures, so reconciliation cannot overwrite the `-1` established by deep-window promotion.
 - 单路抓帧异常或一次动态补位失败只暂停该次更新：固定 DirectComposition 表面继续显示最后一张完整合成画面，失败来源或新补位在后续循环恢复，不让宿主应用短暂露出。A single-source frame error or one failed backfill only skips that update: the fixed DirectComposition surface keeps the last complete composition visible while the source or replacement recovers later, preventing the host application from briefly showing through.
+- 普通顶层来源在真实窗口边界内按不透明表面合成，并在 GPU 着色器中消除 WGC 暂态 alpha；DirectComposition 同时裁剪到实际透视框范围，减少宿主内容经透明像素泄漏的机会。Ordinary top-level sources are composed as opaque within their real window bounds after removing transient WGC alpha in the GPU shader. DirectComposition is also clipped to the portal frame, reducing any path for host content to leak through transparent pixels.
+- 唯一的 GPU 显示 HWND 会持续核对其真实桌面层级，并在落到宿主窗口后方时以不激活窗口的方式立即复位；探针以 2 ms 间隔记录显示层低于宿主的瞬态帧。The single GPU display HWND continuously verifies its real desktop Z-order and is restored without activation whenever it falls behind the protected host. The probe records transient display-below-host samples at 2 ms intervals.
+- 来源激活守卫按本次捕获的窗口家族匹配，不再按整个进程匹配；因此文件资源管理器与任务栏、桌面共享 `explorer.exe` 时不会发生错误层级恢复。Source activation protection matches only the captured window family rather than the whole process, preventing false Z-order recovery when File Explorer shares `explorer.exe` with the taskbar and desktop.
 
 ## 暂未包含 / Not included yet
 
 - 点击不可见、完全被浅层遮住的窗口。Clicking a completely occluded window that is not actually visible.
+- 抖音桌面版等只向顶层 WGC 返回透明空帧、且把实际内容放在不可独立捕获的 D3D 子窗口中的应用。Apps such as Douyin Desktop that return only a transparent top-level WGC frame while placing real content in a D3D child window that cannot be captured independently.
 
-因此，本 alpha 主要用于验证多层视觉、移动稳定性和性能。真实点击、滚轮和拖放仍由 Windows 当前实际命中的最前一层接收。多层 GPU 会话失败时会安全回退到 2.1.0 单层 CPU 管线。
+正式 2.3.0 已完成多层视觉、移动稳定性、深层提升、真实输入同步、动态补位和文件资源管理器稳定性验证。真实点击、滚轮和拖放仍由 Windows 当前实际命中的最前一层接收；多层 GPU 会话失败时会安全回退到 2.1.0 单层 CPU 管线。
 
-This alpha primarily validates multi-layer visuals, motion stability, and performance. Native click, wheel, and drag input still goes to the frontmost window actually hit by Windows. A multi-source GPU failure safely falls back to the 2.1.0 single-layer CPU renderer.
+The final 2.3.0 release covers multi-window visuals, motion stability, deep-window promotion, physical input synchronization, dynamic backfill, and File Explorer stability. Native click, wheel, and drag input still goes to the frontmost window actually hit by Windows. A multi-source GPU failure safely falls back to the 2.1.0 single-layer CPU renderer.

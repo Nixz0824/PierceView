@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480" viewBox="0 0 1200 480" role="img" aria-labelledby="title desc">
   <title id="title">寸镜 PierceView — 按住 F8 查看并操作后台窗口</title>
-  <desc id="desc">Bilingual monochrome hero showing two overlapping application windows and a circular portal into the window behind.</desc>
+  <desc id="desc">Bilingual monochrome hero showing overlapping application windows and a rounded rectangular portal into up to four layers behind.</desc>
 
   <rect width="1200" height="480" rx="28" fill="#F4F1E8"/>
   <path d="M0 28A28 28 0 0 1 28 0h1144a28 28 0 0 1 28 28v424a28 28 0 0 1-28 28H28A28 28 0 0 1 0 452Z" fill="none" stroke="#111111" stroke-width="2"/>
@@ -16,7 +16,7 @@
   <text x="56" y="330" fill="#4E4C47" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="24">Hold F8 to view and interact with the window behind.</text>
 
   <g font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="15" font-weight="650">
-    <text x="56" y="390" fill="#111111">v2.2.0 · GPU EDITION / GPU 版本</text>
+    <text x="56" y="390" fill="#111111">v2.3.0 · GPU EDITION / GPU 版本</text>
     <circle cx="324" cy="385" r="3" fill="#111111"/>
     <text x="340" y="390" fill="#111111">Windows 10 / 11</text>
     <circle cx="481" cy="385" r="3" fill="#111111"/>
@@ -24,7 +24,7 @@
   </g>
 
   <g transform="translate(704 38)">
-    <text x="205" y="18" fill="#4E4C47" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="14" font-weight="700" text-anchor="middle" letter-spacing="1">紧贴后方一层 / ONE LAYER BEHIND</text>
+    <text x="205" y="18" fill="#4E4C47" font-family="Segoe UI, Microsoft YaHei, Noto Sans SC, Arial, sans-serif" font-size="14" font-weight="700" text-anchor="middle" letter-spacing="1">最多后方四层 / UP TO FOUR LAYERS</text>
 
     <rect x="16" y="40" width="358" height="258" rx="20" fill="#FFFDF7" stroke="#111111" stroke-width="7"/>
     <path d="M20 94H370" stroke="#111111" stroke-width="7"/>
@@ -41,9 +41,9 @@
     <circle cx="150" cy="152" r="8" fill="#111111"/>
     <circle cx="177" cy="152" r="8" fill="#111111"/>
 
-    <circle cx="276" cy="286" r="84" fill="#FFFDF7" stroke="#F4F1E8" stroke-width="6"/>
-    <text x="191" y="312" fill="#111111" font-family="Segoe UI, Arial, sans-serif" font-size="70" font-weight="800">ABC</text>
-    <path d="M196 246H351M196 334H351" stroke="#111111" stroke-width="7" stroke-linecap="round"/>
+    <rect x="176" y="220" width="204" height="132" rx="26" fill="#FFFDF7" stroke="#F4F1E8" stroke-width="6"/>
+    <text x="194" y="310" fill="#111111" font-family="Segoe UI, Arial, sans-serif" font-size="66" font-weight="800">ABC</text>
+    <path d="M196 248H353M196 329H353" stroke="#111111" stroke-width="7" stroke-linecap="round"/>
 
     <g transform="translate(0 356)">
       <rect x="0" y="0" width="70" height="48" rx="10" fill="#FFFDF7" stroke="#111111" stroke-width="3"/>

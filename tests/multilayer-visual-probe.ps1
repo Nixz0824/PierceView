@@ -31,6 +31,7 @@ public static class MultiLayerVisualProbeNative
 
     public struct PortalWindowState
     {
+        public IntPtr Handle;
         public Rect Bounds;
         public int RegionType;
         public long ExtendedStyle;
@@ -88,6 +89,9 @@ public static class MultiLayerVisualProbeNative
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetWindow(IntPtr window, uint command);
 
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
@@ -173,6 +177,7 @@ public static class MultiLayerVisualProbeNative
 
                 result.Add(new PortalWindowState
                 {
+                    Handle = window,
                     Bounds = rect,
                     RegionType = regionType,
                     ExtendedStyle = GetWindowLongPtr(window, -20).ToInt64(),
@@ -184,6 +189,29 @@ public static class MultiLayerVisualProbeNative
             return true;
         }, IntPtr.Zero);
         return result.ToArray();
+    }
+
+    public static bool IsWindowAbove(IntPtr candidate, IntPtr reference)
+    {
+        if (candidate == IntPtr.Zero || reference == IntPtr.Zero ||
+            candidate == reference || !IsWindow(candidate) ||
+            !IsWindow(reference))
+        {
+            return false;
+        }
+
+        int inspected = 0;
+        for (IntPtr window = GetWindow(reference, 3);
+             window != IntPtr.Zero && inspected < 16384;
+             window = GetWindow(window, 3), inspected++)
+        {
+            if (window == candidate)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 '@
@@ -213,6 +241,7 @@ New-Item -ItemType Directory -Force -Path $diagnosticDirectory | Out-Null
 $portalOutput = Join-Path $diagnosticDirectory 'multilayer-visual-probe.log'
 $portalError = Join-Path $diagnosticDirectory 'multilayer-visual-probe.error.log'
 $screenshotPath = Join-Path $diagnosticDirectory 'multilayer-visual-probe.png'
+$displayBelowHostScreenshotPath = Join-Path $diagnosticDirectory 'multilayer-display-below-host.png'
 $deepProcess = $null
 $deepestProcess = $null
 $middleProcess = $null
@@ -357,9 +386,12 @@ try {
     # Keep the portal alive beyond the complete sampling interval. Otherwise
     # the normal HidePortal/exit transition can be sampled as a false black
     # frame while the process is still completing its finally block.
+    # Four 2 ms Z-order samples now run inside every frame sample. Keep the
+    # probe alive with enough teardown margin so the final iterations do not
+    # observe the normal display-window shutdown as a missing frame.
     $portalProcess = Start-Process `
         -FilePath $portalPath `
-        -ArgumentList @('--multilayer-probe-hwnd', "0x$($ChatGptWindow.ToString('X'))", '--probe-duration-ms', '2500') `
+        -ArgumentList @('--multilayer-probe-hwnd', "0x$($ChatGptWindow.ToString('X'))", '--probe-duration-ms', '3500') `
         -WindowStyle Hidden `
         -PassThru `
         -RedirectStandardOutput $portalOutput `
@@ -419,6 +451,7 @@ try {
     $invalidAlphaLayeredFrameCount = 0
     $prewarmAlphaFrameCount = 0
     $missingPortalWindowFrameCount = 0
+    $displayBelowHostFrameCount = 0
     $invalidCompositeFrameCount = 0
     $confirmedValidNonLayerPointSampleCount = 0
     $invalidCompositeSamples = [System.Collections.Generic.List[string]]::new()
@@ -441,6 +474,39 @@ try {
             }
             else {
                 $sampleBounds = $states[0].Bounds
+                # The portal can remain alive while temporarily falling behind
+                # the protected host. Sample the real HWND Z-order at 2 ms
+                # intervals so a one-frame regression on a high-refresh panel
+                # cannot hide behind the slower pixel capture checks.
+                for ($zOrderSample = 0; $zOrderSample -lt 4; $zOrderSample++) {
+                    if (-not [MultiLayerVisualProbeNative]::IsWindowAbove(
+                            $states[0].Handle,
+                            $chatGpt)) {
+                        $displayBelowHostFrameCount++
+                        if (-not (Test-Path -LiteralPath $displayBelowHostScreenshotPath)) {
+                            $zOrderBitmap = [System.Drawing.Bitmap]::new($portalWidth, $portalHeight)
+                            $zOrderGraphics = [System.Drawing.Graphics]::FromImage($zOrderBitmap)
+                            try {
+                                $zOrderGraphics.CopyFromScreen(
+                                    $centerX - $portalHalfWidth,
+                                    $centerY - $portalHalfHeight,
+                                    0,
+                                    0,
+                                    [System.Drawing.Size]::new($portalWidth, $portalHeight))
+                                $zOrderBitmap.Save(
+                                    $displayBelowHostScreenshotPath,
+                                    [System.Drawing.Imaging.ImageFormat]::Png)
+                            }
+                            finally {
+                                $zOrderGraphics.Dispose()
+                                $zOrderBitmap.Dispose()
+                            }
+                        }
+                    }
+
+                    Start-Sleep -Milliseconds 2
+                }
+
                 $sampleGraphics.CopyFromScreen(
                     $centerX,
                     $centerY + 80,
@@ -595,6 +661,8 @@ try {
     Write-Output "INVALID_ALPHA_LAYERED_FRAMES=$invalidAlphaLayeredFrameCount"
     Write-Output "PREWARM_ALPHA_FRAMES=$prewarmAlphaFrameCount"
     Write-Output "MISSING_PORTAL_WINDOW_FRAMES=$missingPortalWindowFrameCount"
+    Write-Output "DISPLAY_BELOW_HOST_FRAMES=$displayBelowHostFrameCount"
+    Write-Output "DISPLAY_BELOW_HOST_SCREENSHOT=$displayBelowHostScreenshotPath"
     Write-Output "INVALID_COMPOSITE_FRAMES=$invalidCompositeFrameCount"
     Write-Output "INVALID_COMPOSITE_SAMPLES=$($invalidCompositeSamples -join ';')"
     Write-Output "CONFIRMED_VALID_NON_LAYER_POINT_SAMPLES=$confirmedValidNonLayerPointSampleCount"
@@ -609,6 +677,7 @@ try {
         -not $layerPositionsSynchronized -or
         $colorKeyPortalWindowCount -ne 0 -or
         $missingPortalWindowFrameCount -ne 0 -or
+        $displayBelowHostFrameCount -ne 0 -or
         $invalidCompositeFrameCount -ne 0 -or
         -not $performanceWithinBudget) {
         throw 'The multi-layer visual and motion probe failed.'

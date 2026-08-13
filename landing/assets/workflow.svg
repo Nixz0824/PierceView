@@ -40,7 +40,7 @@
       <rect width="244" height="188" rx="18" fill="#111111" stroke="#111111" stroke-width="2"/>
       <circle cx="28" cy="28" r="16" fill="#FFFDF7"/>
       <text x="28" y="34" fill="#111111" font-size="16" font-weight="800" text-anchor="middle">3</text>
-      <circle cx="122" cy="71" r="43" fill="#FFFDF7"/>
+      <rect x="69" y="35" width="106" height="72" rx="15" fill="#FFFDF7"/>
       <path d="M96 58H148M96 73H140M96 88H133" stroke="#111111" stroke-width="5" stroke-linecap="round"/>
       <text x="122" y="142" fill="#FFFDF7" font-size="20" font-weight="750" text-anchor="middle">查看 · 滚动 · 点击</text>
       <text x="122" y="168" fill="#D8D4CA" font-size="16" text-anchor="middle">View · Scroll · Click</text>

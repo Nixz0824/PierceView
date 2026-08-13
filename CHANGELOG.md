@@ -6,6 +6,66 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-08-14
+
+### GPU Edition / GPU 版本
+
+- 将用户验证通过的 `2.3.0-multilayer-alpha.9` 收口为正式 GPU 版本；沿用 2.2.0 的 WGC/D3D11/DirectComposition 固定显示层和 2.1.0 CPU 自动回退，不改变轻量托盘工具定位。
+- Promote the user-validated `2.3.0-multilayer-alpha.9` to the stable GPU Edition. It retains the 2.2.0 WGC/D3D11/DirectComposition fixed display surface, the 2.1.0 automatic CPU fallback, and the lightweight tray-utility form.
+
+### Added
+
+- 按真实屏幕边界和 Z-order 同时重建宿主后方最多 `-1` 至 `-4` 四层窗口；浅层覆盖处显示浅层，未覆盖处继续显示更深层，超过 `-4` 不识别。
+- Reconstruct at most layers `-1` through `-4` behind the host from real screen bounds and Z-order. Shallower windows win where they cover, uncovered pixels reveal deeper layers, and anything beyond `-4` is ignored.
+- 点击透视框内可见的深层窗口时，只把它提升为宿主正后方的新 `-1`；宿主保持前台，其他后台来源保持相对顺序。
+- Clicking a visible deeper window promotes it only to the new `-1` slot behind the host. The host remains foreground and other background sources preserve their relative order.
+- F8 会话中关闭或最小化来源后自动从更深候选补位，仍严格限制最多四层；仍有效的 WGC 会话和纹理继续复用。
+- Backfill automatically from deeper candidates when a source closes or minimizes during F8, while retaining the strict four-layer limit and reusing valid WGC sessions and textures.
+
+### Changed
+
+- 2.3 多层 GPU 路径固定使用圆角羽化矩形。点击、滚轮和拖放与视觉新 `-1` 的真实 Windows 输入层级同步，不只改变画面顺序。
+- The 2.3 multi-window GPU path uses a rounded feathered rectangle. Click, wheel, and drag input stays synchronized with the physical Windows order of the visual new `-1`, not merely its displayed order.
+- 深层交换优先等待被提升来源产生新帧，最长保留旧完整合成 8 ms；单路抓帧异常或一次补位竞态改为保帧重试，不立即拆毁显示层。
+- Deep-window switching prefers a fresh frame from the promoted source and holds the previous complete composition for at most 8 ms. A single capture error or one reconciliation race now keeps the last frame and retries instead of tearing down the display.
+
+### Fixed
+
+- 以临时置顶屏障、宿主拥有显示层、来源非激活样式和 2 ms 前台复查阻止后台来源因原生点击短暂覆盖宿主。
+- Prevent background sources from briefly covering the host after native input through a temporary topmost barrier, host-owned display surface, non-activating source styles, and 2 ms foreground rechecks.
+- 将普通顶层来源按不透明窗口边界合成，同时增加 DirectComposition 内容裁剪和显示层 Z-order 心跳，减少宿主画面经异常 alpha 或显示层失序闪入透视框。
+- Composite ordinary top-level sources as opaque within real bounds, add DirectComposition content clipping, and guard display-surface Z-order to prevent host content from flashing through transient alpha or display-order errors.
+- 修复文件资源管理器作为来源时持续闪屏：守卫按捕获 HWND 及其子窗口/拥有窗口家族匹配，不再把同属 `explorer.exe` 的任务栏、桌面或 Shell 辅助窗口当作来源。
+- Fix persistent flashing with File Explorer by matching the captured HWND family instead of treating the taskbar, desktop, or other Shell windows sharing `explorer.exe` as the source.
+
+### Compatibility
+
+- 抖音桌面版等把实际内容放在不可独立捕获的 D3D 子表面、而顶层 WGC 只返回透明帧的应用，当前可能只有点击、没有视觉；寸镜不绕过该捕获边界。
+- Apps such as Douyin Desktop that place real content in an independently non-capturable D3D child surface while top-level WGC returns transparency may accept input without a visual. PierceView does not bypass that capture boundary.
+
+### Verified
+
+- 用户在 2560×1440、260Hz 桌面上完成 alpha.9 实际使用验收；正式构建 0 警告/0 错误，自检 `33/33`，GPU 能力、最终 EXE GPU 闭环与 CPU 视觉冒烟通过，Microsoft Defender 为 0 检出。
+- The user accepted alpha.9 in real use on a 2560×1440, 260Hz desktop. The final build has zero warnings/errors, self-tests pass `33/33`, GPU capability, final-EXE GPU closed-loop, and CPU visual smoke checks pass, and Microsoft Defender reports zero detections.
+
+### 2.3.0-multilayer-alpha.9 (local experimental build)
+
+- 修复文件资源管理器作为后台来源时持续闪屏：前台与层级守卫不再把同属 `explorer.exe` 的任务栏、桌面和 Shell 辅助窗口误认为当前捕获来源，只处理本次来源 HWND、其子窗口和拥有窗口家族。
+- Fix persistent flashing when File Explorer is a background source. Foreground and Z-order protection no longer mistakes the taskbar, desktop, or other Shell windows sharing `explorer.exe` for the captured folder window; only the captured HWND and its child/owned window family are handled.
+- 保留 alpha.8 的来源 alpha 不透明化、DirectComposition 裁剪、动态来源去抖和显示层级守卫。
+- Retain alpha.8 source-alpha normalization, DirectComposition clipping, dynamic-source debounce, and display Z-order protection.
+
+### 2.3.0-multilayer-alpha.8 (local experimental build)
+
+- 修复透视区域仍会短暂闪现宿主应用内容：GPU 合成不再把普通顶层窗口的 WGC alpha 当作真实穿透层级。来源窗口真实边界内强制按不透明遮挡处理，并在恢复不透明度前还原预乘颜色，避免瞬时 alpha 异常让已挖孔的宿主画面泄漏进透视区。
+- Fix host-application content still flashing inside the portal. GPU composition no longer treats WGC alpha from ordinary top-level windows as real see-through depth. Pixels inside each source window's real bounds are composed as opaque after un-premultiplying color, preventing transient alpha anomalies from leaking the already-cut host through the portal.
+- 在 HLSL 形状蒙版之外增加 DirectComposition 内容裁剪，只让实际透视框范围参与桌面合成；全屏透明显示 HWND 的框外像素不再单独依赖 layered-window alpha 状态。
+- Add a DirectComposition content clip in addition to the HLSL shape mask, restricting desktop composition to the portal frame instead of relying solely on layered-window alpha for pixels across the full-screen display HWND.
+- 动态来源协调对单次可见性/根窗口状态抖动增加连续三次确认，窗口真正销毁或最小化仍立即处理，避免 75 ms 检查把暂态状态误判为关闭并重建捕获。
+- Require three consecutive invalid probes for transient visibility/root-window changes while still handling actual destruction or minimization immediately, preventing the 75 ms reconciler from rebuilding capture after one unstable state sample.
+- 为唯一的 DirectComposition 显示 HWND 增加无激活层级守卫：正常刷新、首次显示及 16 ms 心跳都会核对它是否仍位于宿主窗口上方，仅在失序时插回宿主正上方，避免显示层仍存在却被宿主短暂盖住。
+- Add a non-activating Z-order guard for the single DirectComposition display HWND. Normal updates, first show, and a 16 ms heartbeat verify that it remains above the protected host and reinsert only a misplaced display immediately above that host, preventing the host from briefly covering an otherwise live portal.
+
 ### 2.3.0-multilayer-alpha.7 (local experimental build)
 
 - 修复多层透视会话偶尔短暂消失并露出宿主应用画面：单个 WGC 来源的瞬时抓帧异常不再标记为整套 GPU 会话永久失败，而是继续显示上一张完整有效合成帧并等待后续帧恢复。

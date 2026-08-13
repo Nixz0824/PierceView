@@ -74,9 +74,9 @@ internal sealed class PortalRuntime : IDisposable
 
     private void Run(PortalGeometry geometry, int pollMilliseconds)
     {
-        // 2.3 alpha intentionally exposes one fixed rectangle only. Existing
-        // circle settings remain stored for the stable 2.2 application but do
-        // not change this experimental multi-window compositor.
+        // The 2.3 multi-window compositor intentionally uses one fixed rounded
+        // rectangle. Existing circle settings stay stored for compatibility
+        // with older releases but do not reshape this runtime path.
         if (geometry.Shape != PortalShape.Rectangle)
         {
             geometry = PortalGeometry.Rectangle(

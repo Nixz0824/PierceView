@@ -55,7 +55,7 @@ internal sealed record UiText(
 {
     internal static UiText Chinese { get; } = new(
         "寸镜 / PierceView 设置",
-        "透视形状（2.3 实验版）",
+        "透视形状（2.3 GPU 版本）",
         "圆形",
         "圆角矩形（固定）",
         "圆形清晰区半径",
@@ -90,7 +90,7 @@ internal sealed record UiText(
 
     internal static UiText English { get; } = new(
         "PierceView Settings",
-        "Portal shape (2.3 experimental)",
+        "Portal shape (2.3 GPU Edition)",
         "Circle",
         "Rounded rectangle (fixed)",
         "Clear circle radius",

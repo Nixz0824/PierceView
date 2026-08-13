@@ -66,6 +66,19 @@ internal sealed class AdaptivePortalOverlay : IDisposable
         _ => 0,
     };
 
+    internal int DisplayZOrderRecoveryCount => activeBackend switch
+    {
+        ActiveBackend.Gpu => gpuOverlay?.DisplayZOrderRecoveryCount ?? 0,
+        _ => 0,
+    };
+
+    internal bool IsDisplayAboveProtected => activeBackend switch
+    {
+        ActiveBackend.Gpu => gpuOverlay?.IsDisplayAboveProtected == true,
+        ActiveBackend.Cpu => cpuOverlay.IsVisible,
+        _ => false,
+    };
+
     internal int SourceReconciliationCount => activeBackend switch
     {
         ActiveBackend.Gpu => gpuOverlay?.SourceReconciliationCount ?? 0,

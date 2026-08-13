@@ -130,6 +130,10 @@ internal static class GpuPortalSmokeTests
                 $"调度={updates}，WGC 新帧={capturedFrames}，" +
                 $"GPU 透视提交={presentedFrames}，" +
                 $"显示层定位={displayPlacements}，" +
+                $"前台恢复={overlay.ForegroundRecoveryCount}，" +
+                $"立即层级钳制={overlay.ImmediateForegroundClampCount}，" +
+                $"显示层级恢复={overlay.DisplayZOrderRecoveryCount}，" +
+                $"显示层位于宿主上方={overlay.IsDisplayAboveProtected}，" +
                 $"虚拟屏幕={displayBounds.Width}x{displayBounds.Height}，" +
                 $"P95={p95:F2}ms，P99={p99:F2}ms，" +
                 $"最慢={maximumUpdateMilliseconds:F2}ms，" +

@@ -1,4 +1,6 @@
-# 寸镜 / PierceView 2.2 安全模型
+# 寸镜 / PierceView 2.3 安全模型
+
+Security model for **PierceView 2.3 GPU Edition**. English follows each Chinese section where the behavior materially changed.
 
 ## 报告安全问题 / Reporting a security issue
 
@@ -20,9 +22,9 @@ Include the affected version and SHA256, Windows version, minimal conditions, po
 
 - `GetAsyncKeyState(F8)`：轮询 F8 当前状态，不注册键盘钩子。
 - `SetWindowRgn`：为宿主窗口创建并移动圆形缺口。
-- Windows Graphics Capture + D3D11 + DirectComposition：优先捕获一个后台窗口，并在 GPU 中裁剪、羽化和合成透视区域。
+- Windows Graphics Capture + D3D11 + DirectComposition：优先捕获最多四个后台窗口，并在 GPU 中按真实边界重建遮挡、裁剪和羽化透视区域。
 - DWM thumbnail + `PrintWindow`/`BitBlt`：GPU 路径不可用或失败时使用的 CPU 回退。
-- `SetWindowLongPtr(WS_EX_NOACTIVATE)`：临时避免来源窗口因鼠标操作激活。
+- `SetWindowLongPtr(WS_EX_NOACTIVATE)`：临时避免最多四个来源窗口因鼠标操作激活。
 - `SetWindowPos`、`SetForegroundWindow`、WinEvent：当来源争夺前台时恢复宿主顺序。
 - `SetWindowPos(HWND_TOPMOST/HWND_NOTOPMOST)`：仅在 F8 会话内建立宿主视觉屏障，结束时恢复宿主原始置顶状态；不会保存为系统设置。
 - `%LOCALAPPDATA%\PierceView\settings.json`：仅保存透视形状、尺寸、羽化和语言等本地设置。
@@ -40,7 +42,9 @@ Include the affected version and SHA256, Windows version, minimal conditions, po
 
 ## 游戏与反作弊
 
-寸镜 2.2 不使用多层实验版曾尝试过的低级鼠标钩子，但窗口覆盖、WGC/DWM 捕获和 Z-order 操作仍可能与某些游戏或反作弊策略冲突。无法通过普通功能测试证明“绝不触发封禁”，也不应使用真实游戏账号做破坏性验证。
+寸镜 2.3 不使用低级鼠标钩子；深层选择依赖真实鼠标状态、Win32 命中测试与受限 Z-order 调整。窗口覆盖、WGC/DWM 捕获和 Z-order 操作仍可能与某些游戏或反作弊策略冲突。无法通过普通功能测试证明“绝不触发封禁”，也不应使用真实游戏账号做破坏性验证。
+
+PierceView 2.3 does not install low-level mouse hooks. Deep-window selection uses the real button state, Win32 hit-testing, and constrained Z-order changes. Window overlays, WGC/DWM capture, and Z-order operations may still conflict with some game or anti-cheat policies; ordinary testing cannot prove zero ban risk.
 
 安全使用规则：在启动任何游戏、游戏启动器或反作弊服务前完全退出寸镜。此规则同时适用于网游和带反作弊的单机游戏。
 

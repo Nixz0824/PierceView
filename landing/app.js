@@ -446,7 +446,8 @@
     let y = 0;
     let ptrX = 0;
     let ptrY = 0;
-    let portalPx = 200;
+    let portalW = 300;
+    let portalH = 210;
     let rafId = 0;
     let dirty = false;
 
@@ -464,26 +465,27 @@
       stageH = r.height || 1;
       stageLeft = r.left;
       stageTop = r.top;
-      const raw = getComputedStyle(document.documentElement)
-        .getPropertyValue("--portal")
-        .trim();
-      portalPx = parseFloat(raw) || 200;
+      const styles = getComputedStyle(document.documentElement);
+      portalW = parseFloat(styles.getPropertyValue("--portal-w")) || 300;
+      portalH = parseFloat(styles.getPropertyValue("--portal-h")) || 210;
       portalScroll.style.width = stageW + "px";
       portalScroll.style.height = stageH + "px";
     }
 
     function clamp(lx, ly) {
-      const pad = portalPx * 0.32;
-      x = Math.min(stageW - pad, Math.max(pad, lx));
-      y = Math.min(stageH - pad, Math.max(pad, ly));
+      const padX = portalW * 0.32;
+      const padY = portalH * 0.32;
+      x = Math.min(stageW - padX, Math.max(padX, lx));
+      y = Math.min(stageH - padY, Math.max(padY, ly));
     }
 
     function paint() {
-      const half = portalPx * 0.5;
+      const halfW = portalW * 0.5;
+      const halfH = portalH * 0.5;
       portal.style.transform =
-        "translate3d(" + (x - half) + "px," + (y - half) + "px,0)";
+        "translate3d(" + (x - halfW) + "px," + (y - halfH) + "px,0)";
       portalScroll.style.transform =
-        "translate3d(" + (-x + half) + "px," + (-y + half) + "px,0)";
+        "translate3d(" + (-x + halfW) + "px," + (-y + halfH) + "px,0)";
       stage.style.setProperty("--mx", (x / stageW) * 100 + "%");
       stage.style.setProperty("--my", (y / stageH) * 100 + "%");
     }
@@ -521,7 +523,7 @@
     let isScrollingPortal = false;
     let scrollTimer = 0;
 
-    // Wheel over portal → scroll the -1 document inside circle
+    // Wheel over portal → scroll the background document inside the frame.
     portal.addEventListener(
       "wheel",
       (e) => {
@@ -696,21 +698,6 @@
       { passive: true }
     );
 
-    function clamp(lx, ly) {
-      const pad = portalPx * 0.32;
-      x = Math.min(stageW - pad, Math.max(pad, lx));
-      y = Math.min(stageH - pad, Math.max(pad, ly));
-    }
-
-    function paint() {
-      const half = portalPx * 0.5;
-      portal.style.transform =
-        "translate3d(" + (x - half) + "px," + (y - half) + "px,0)";
-      portalScroll.style.transform =
-        "translate3d(" + (-x + half) + "px," + (-y + half) + "px,0)";
-      stage.style.setProperty("--mx", (x / stageW) * 100 + "%");
-      stage.style.setProperty("--my", (y / stageH) * 100 + "%");
-    }
   }
 
   function boot() {
