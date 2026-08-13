@@ -56,6 +56,12 @@ public static class ConstrainedZOrderProbeNative
     [DllImport("user32.dll")]
     public static extern IntPtr GetWindow(IntPtr window, uint command);
 
+    [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(System.Drawing.Point point);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr window, uint flags);
+
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     public static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
 
@@ -135,6 +141,12 @@ public static class ConstrainedZOrderProbeNative
         return processId;
     }
 
+    public static IntPtr RootFromPoint(int x, int y)
+    {
+        IntPtr hit = WindowFromPoint(new System.Drawing.Point(x, y));
+        return hit == IntPtr.Zero ? IntPtr.Zero : GetAncestor(hit, 2);
+    }
+
     public static bool IsAbove(IntPtr expectedAbove, IntPtr expectedBelow)
     {
         for (IntPtr candidate = GetWindow(expectedBelow, 3);
@@ -148,6 +160,11 @@ public static class ConstrainedZOrderProbeNative
         }
 
         return false;
+    }
+
+    public static void Wheel(int delta)
+    {
+        mouse_event(0x0800, 0, 0, unchecked((uint)delta), UIntPtr.Zero);
     }
 }
 '@
@@ -294,6 +311,7 @@ try {
     $clickY = $centerY
     [ConstrainedZOrderProbeNative]::SetCursorPos($clickX, $clickY) | Out-Null
     Start-Sleep -Milliseconds 35
+    $hitBeforePromotion = [ConstrainedZOrderProbeNative]::RootFromPoint($clickX, $clickY)
     [ConstrainedZOrderProbeNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 35
     [ConstrainedZOrderProbeNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
@@ -306,19 +324,25 @@ try {
     $deepTitle = [ConstrainedZOrderProbeNative]::ReadTitle($deepWindow)
     $shallowTitle = [ConstrainedZOrderProbeNative]::ReadTitle($shallowWindow)
 
-    # The original -1 now has an exposed area on the left. Click it to prove
-    # the same session can exchange the first two background slots repeatedly.
-    $returnClickX = $centerX - 240
-    [ConstrainedZOrderProbeNative]::SetCursorPos($returnClickX, $clickY) | Out-Null
+    # Click a point where both windows overlap. Before promotion it belongs to
+    # the old -1; after promotion both visual composition and native hit testing
+    # must resolve it to the promoted window.
+    $overlapClickX = $centerX - 100
+    [ConstrainedZOrderProbeNative]::SetCursorPos($overlapClickX, $clickY) | Out-Null
     Start-Sleep -Milliseconds 35
+    $hitBeforeSecondClick = [ConstrainedZOrderProbeNative]::RootFromPoint(
+        $overlapClickX,
+        $clickY)
     [ConstrainedZOrderProbeNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 35
     [ConstrainedZOrderProbeNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 120
+    [ConstrainedZOrderProbeNative]::Wheel(120)
     Start-Sleep -Milliseconds 250
-    $foregroundAfterReturnClick = [ConstrainedZOrderProbeNative]::GetForegroundWindow()
-    $belowChatAfterReturnClick = [ConstrainedZOrderProbeNative]::GetVisibleWindow($chatGpt, 2)
-    $deepTitleAfterReturn = [ConstrainedZOrderProbeNative]::ReadTitle($deepWindow)
-    $shallowTitleAfterReturn = [ConstrainedZOrderProbeNative]::ReadTitle($shallowWindow)
+    $foregroundAfterSecondClick = [ConstrainedZOrderProbeNative]::GetForegroundWindow()
+    $belowChatAfterSecondClick = [ConstrainedZOrderProbeNative]::GetVisibleWindow($chatGpt, 2)
+    $deepTitleAfterSecond = [ConstrainedZOrderProbeNative]::ReadTitle($deepWindow)
+    $shallowTitleAfterSecond = [ConstrainedZOrderProbeNative]::ReadTitle($shallowWindow)
 
     $portalProcess.WaitForExit()
     $portalExitCode = $portalProcess.ExitCode
@@ -326,6 +350,12 @@ try {
     $recoveryMatch = [regex]::Match($portalLogText, '回滚次数=(\d+)')
     $immediateClampMatch = [regex]::Match($portalLogText, '前台快速钳制：次数=(\d+)')
     $promotionMatch = [regex]::Match($portalLogText, '受限层级提升：次数=(\d+)')
+    $orderSyncMatch = [regex]::Match(
+        $portalLogText,
+        '视觉/输入层级同步：(True|False)')
+    $physicalRecoveryMatch = [regex]::Match(
+        $portalLogText,
+        '物理后台顺序恢复：次数=(\d+)')
     $foregroundRecoveryCount = if ($recoveryMatch.Success) {
         [int]$recoveryMatch.Groups[1].Value
     }
@@ -340,6 +370,12 @@ try {
     }
     $immediateClampCount = if ($immediateClampMatch.Success) {
         [int]$immediateClampMatch.Groups[1].Value
+    }
+    else {
+        0
+    }
+    $physicalOrderRecoveryCount = if ($physicalRecoveryMatch.Success) {
+        [int]$physicalRecoveryMatch.Groups[1].Value
     }
     else {
         0
@@ -360,15 +396,23 @@ try {
     $stylesRestored =
         $shallowStyleAfter -eq $shallowStyleBefore -and
         $deepStyleAfter -eq $deepStyleBefore
-    $promotionGuardTriggered = $promotionCount -ge 1
+    # The first native click may already have raised the deep target before
+    # PierceView samples the edge. In that race, the guard still synchronizes
+    # its selected source and the final physical-order assertion is authoritative.
     $hostWasTopmost = ($hostStyleBefore.ToInt64() -band 0x00000008) -ne 0
     $hostBarrierApplied = ($hostStyleDuring.ToInt64() -band 0x00000008) -ne 0
     $hostTopmostRestored =
         (($hostStyleAfter.ToInt64() -band 0x00000008) -ne 0) -eq $hostWasTopmost
-    $returnedShallowDirectlyBelow = $belowChatAfterReturnClick -eq $shallowWindow
-    $secondClickForwarded = $shallowTitleAfterReturn -like '*Clicks: 1*'
-    $deepNotClickedTwice = $deepTitleAfterReturn -like '*Clicks: 1*'
-    $foregroundPreservedAfterReturn = $foregroundAfterReturnClick -eq $chatGpt
+    $firstHitWasExposedDeep = $hitBeforePromotion -eq $deepWindow
+    $secondHitWasPromotedDeep = $hitBeforeSecondClick -eq $deepWindow
+    $promotedStillDirectlyBelow = $belowChatAfterSecondClick -eq $deepWindow
+    $secondClickForwarded = $deepTitleAfterSecond -like '*Clicks: 2*'
+    $shallowStillNotClicked = $shallowTitleAfterSecond -like '*Clicks: 0*'
+    $wheelForwarded = $deepTitleAfterSecond -notlike '*Wheel: 0*'
+    $shallowWheelUntouched = $shallowTitleAfterSecond -like '*Wheel: 0*'
+    $foregroundPreservedAfterSecond = $foregroundAfterSecondClick -eq $chatGpt
+    $visualInputOrderSynchronized =
+        $orderSyncMatch.Success -and $orderSyncMatch.Groups[1].Value -eq 'True'
 
     Write-Output "PORTAL_EXIT=$portalExitCode"
     Write-Output "CHATGPT_HWND=0x$($chatGpt.ToInt64().ToString('X'))"
@@ -392,10 +436,18 @@ try {
     Write-Output "HOST_TOPMOST_BARRIER_APPLIED=$hostBarrierApplied"
     Write-Output "HOST_TOPMOST_STATE_RESTORED=$hostTopmostRestored"
     Write-Output "PROMOTION_COUNT=$promotionCount"
-    Write-Output "RETURNED_SHALLOW_DIRECTLY_BELOW=$returnedShallowDirectlyBelow"
+    Write-Output "HIT_BEFORE_PROMOTION=0x$($hitBeforePromotion.ToInt64().ToString('X'))"
+    Write-Output "HIT_BEFORE_SECOND_CLICK=0x$($hitBeforeSecondClick.ToInt64().ToString('X'))"
+    Write-Output "FIRST_HIT_WAS_EXPOSED_DEEP=$firstHitWasExposedDeep"
+    Write-Output "SECOND_HIT_WAS_PROMOTED_DEEP=$secondHitWasPromotedDeep"
+    Write-Output "PROMOTED_STILL_DIRECTLY_BELOW=$promotedStillDirectlyBelow"
     Write-Output "SECOND_CLICK_FORWARDED=$secondClickForwarded"
-    Write-Output "DEEP_NOT_CLICKED_TWICE=$deepNotClickedTwice"
-    Write-Output "FOREGROUND_PRESERVED_AFTER_RETURN=$foregroundPreservedAfterReturn"
+    Write-Output "SHALLOW_STILL_NOT_CLICKED=$shallowStillNotClicked"
+    Write-Output "WHEEL_FORWARDED=$wheelForwarded"
+    Write-Output "SHALLOW_WHEEL_UNTOUCHED=$shallowWheelUntouched"
+    Write-Output "FOREGROUND_PRESERVED_AFTER_SECOND=$foregroundPreservedAfterSecond"
+    Write-Output "VISUAL_INPUT_ORDER_SYNCHRONIZED=$visualInputOrderSynchronized"
+    Write-Output "PHYSICAL_ORDER_RECOVERY_COUNT=$physicalOrderRecoveryCount"
 
     if ($portalExitCode -ne 0 -or
         -not $deepClickForwarded -or
@@ -408,12 +460,15 @@ try {
         -not $stylesRestored -or
         -not $hostBarrierApplied -or
         -not $hostTopmostRestored -or
-        -not $promotionGuardTriggered -or
-        -not $returnedShallowDirectlyBelow -or
+        -not $firstHitWasExposedDeep -or
+        -not $secondHitWasPromotedDeep -or
+        -not $promotedStillDirectlyBelow -or
         -not $secondClickForwarded -or
-        -not $deepNotClickedTwice -or
-        -not $foregroundPreservedAfterReturn -or
-        $promotionCount -lt 2) {
+        -not $shallowStillNotClicked -or
+        -not $wheelForwarded -or
+        -not $shallowWheelUntouched -or
+        -not $foregroundPreservedAfterSecond -or
+        -not $visualInputOrderSynchronized) {
         throw 'The constrained Z-order promotion probe failed.'
     }
 }

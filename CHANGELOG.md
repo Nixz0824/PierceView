@@ -6,6 +6,15 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 ## [Unreleased]
 
+### 2.3.0-multilayer-alpha.5 (local experimental build)
+
+- 修复深层窗口在视觉上成为新 `-1` 后，点击、滚轮和拖放仍可能落到旧 `-1`：守卫现在持续核对所有已捕获来源的真实 Windows Z-order，并在后台应用自行重排后把所选来源无激活地恢复为真实 `-1`；GPU 合成顺序只有在物理提升成功后才同步。
+- Fix click, wheel, and drag still reaching the old `-1` after a deep window visually becomes the new `-1`. The guard now continuously verifies the real Windows Z-order of all captured sources and restores the selected source to the physical `-1` slot without activation after an app reorders itself; GPU composition changes only after physical promotion succeeds.
+- 深层交换时短暂保留上一张完整合成帧，优先等待被提升来源产生交换后的新 WGC 帧再一次性显示新顺序，并设置 8 ms 最长等待避免静态窗口停住；窗口捕获会话、固定 DirectComposition 显示层和原生输入安全边界保持不变。
+- Briefly hold the last complete composition during a deep-layer exchange, preferably exposing the new order only after the promoted source publishes a fresh WGC frame, with an 8 ms maximum hold so static windows cannot stall. The capture sessions, fixed DirectComposition surface, and native-input safety boundary remain unchanged.
+- 专用层级探针新增重叠区第二次点击、滚轮、真实 `WindowFromPoint` 命中、物理 `-1` 与 GPU 来源同步断言，不再只凭提升计数判断成功。
+- Extend the constrained Z-order probe with a second overlap click, wheel input, real `WindowFromPoint` hit, physical `-1`, and GPU-source synchronization assertions instead of treating a promotion counter as proof.
+
 ### 2.3.0-multilayer-alpha.4 (local experimental build)
 
 - 将后台整窗闪现修复从“事件到达后恢复”升级为预防式窗口带隔离：F8 会话期间临时把宿主放入 Windows 置顶窗口带，普通后台来源即使短暂激活也无法在桌面合成器中覆盖宿主。

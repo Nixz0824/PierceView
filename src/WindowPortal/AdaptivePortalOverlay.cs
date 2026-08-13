@@ -73,6 +73,28 @@ internal sealed class AdaptivePortalOverlay : IDisposable
         _ => 0,
     };
 
+    internal nint PhysicallySelectedSourceWindow => activeBackend switch
+    {
+        ActiveBackend.Gpu =>
+            gpuOverlay?.PhysicallySelectedSourceWindow ?? nint.Zero,
+        ActiveBackend.Cpu => cpuOverlay.SourceWindow,
+        _ => nint.Zero,
+    };
+
+    internal int PhysicalOrderRecoveryCount => activeBackend switch
+    {
+        ActiveBackend.Gpu => gpuOverlay?.PhysicalOrderRecoveryCount ?? 0,
+        _ => 0,
+    };
+
+    internal bool IsPhysicalSourceOrderSynchronized => activeBackend switch
+    {
+        ActiveBackend.Gpu =>
+            gpuOverlay?.IsPhysicalSourceOrderSynchronized == true,
+        ActiveBackend.Cpu => cpuOverlay.IsVisible,
+        _ => false,
+    };
+
     internal bool HasPresentedFrame => activeBackend switch
     {
         ActiveBackend.Gpu => (gpuOverlay?.PresentedFrames ?? 0) > 0,

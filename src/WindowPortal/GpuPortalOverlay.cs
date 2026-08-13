@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DirectComposition;
@@ -20,6 +21,7 @@ namespace WindowPortal;
 internal sealed class GpuPortalOverlay : IDisposable
 {
     private const int MaximumCanvasDimension = 16_384;
+    private const int OrderSwitchMaximumHoldMilliseconds = 8;
 
     private const string ShaderSource = """
         cbuffer PortalParameters : register(b0)
@@ -160,6 +162,12 @@ internal sealed class GpuPortalOverlay : IDisposable
     private long latestCaptureSerial;
     private long presentedCaptureSerial;
     private long presentedFrames;
+    private long compositionOrderSerial;
+    private long presentedCompositionOrderSerial;
+    private long pendingOrderCaptureSerial;
+    private nint pendingOrderSourceWindow;
+    private long pendingOrderSourceFrameSerial;
+    private long pendingOrderDeadlineTimestamp;
     private int displayPlacementCount;
     private volatile bool active;
     private bool windowShown;
@@ -295,6 +303,29 @@ internal sealed class GpuPortalOverlay : IDisposable
 
     internal int BackgroundPromotionCount => foregroundGuard.PromotionCount;
 
+    internal int PhysicalOrderRecoveryCount =>
+        foregroundGuard.PhysicalOrderRecoveryCount;
+
+    internal nint PhysicallySelectedSourceWindow =>
+        foregroundGuard.SelectedSourceWindow;
+
+    internal bool IsPhysicalSourceOrderSynchronized =>
+        foregroundGuard.IsSelectedSourceFrontmost;
+
+    internal static bool ShouldHoldCompositionOrderSwitch(
+        long presentedOrderSerial,
+        long currentOrderSerial,
+        long captureSerial,
+        long orderStartCaptureSerial,
+        long currentPromotedSourceFrameSerial,
+        long orderStartPromotedSourceFrameSerial,
+        bool holdDeadlineExpired) =>
+        presentedOrderSerial != currentOrderSerial &&
+        !holdDeadlineExpired &&
+        (captureSerial <= orderStartCaptureSerial ||
+         currentPromotedSourceFrameSerial <=
+         orderStartPromotedSourceFrameSerial);
+
     internal long CapturedFrames => Interlocked.Read(ref latestCaptureSerial);
 
     internal long PresentedFrames => Interlocked.Read(ref presentedFrames);
@@ -396,6 +427,12 @@ internal sealed class GpuPortalOverlay : IDisposable
             latestCaptureSerial = 0;
             presentedCaptureSerial = 0;
             presentedFrames = 0;
+            compositionOrderSerial = 0;
+            presentedCompositionOrderSerial = 0;
+            pendingOrderCaptureSerial = 0;
+            pendingOrderSourceWindow = nint.Zero;
+            pendingOrderSourceFrameSerial = 0;
+            pendingOrderDeadlineTimestamp = 0;
             displayPlacementCount = 0;
             captureFailure = null;
             foreach (var source in captureSources)
@@ -471,8 +508,33 @@ internal sealed class GpuPortalOverlay : IDisposable
             }
 
             var captureSerial = Interlocked.Read(ref latestCaptureSerial);
+            var orderSerial = compositionOrderSerial;
+            var currentPromotedSourceFrameSerial = pendingOrderSourceWindow == nint.Zero
+                ? pendingOrderSourceFrameSerial + 1
+                : captureSources
+                    .First(source => source.Window == pendingOrderSourceWindow)
+                    .FrameSerial;
+            if (ShouldHoldCompositionOrderSwitch(
+                    presentedCompositionOrderSerial,
+                    orderSerial,
+                    captureSerial,
+                    pendingOrderCaptureSerial,
+                    currentPromotedSourceFrameSerial,
+                    pendingOrderSourceFrameSerial,
+                    holdDeadlineExpired:
+                        pendingOrderDeadlineTimestamp != 0 &&
+                        Stopwatch.GetTimestamp() >= pendingOrderDeadlineTimestamp))
+            {
+                // The native Z-order changes before WGC publishes the resulting
+                // source frame. Keep the last complete composition on screen
+                // instead of presenting a one-frame mixed old/new ordering.
+                error = null;
+                return true;
+            }
+
             if (lastPresentedCenter == screenCenter &&
                 presentedCaptureSerial == captureSerial &&
+                presentedCompositionOrderSerial == orderSerial &&
                 SourceBoundsEqual(lastPresentedSourceBounds, sourceBounds))
             {
                 error = null;
@@ -577,6 +639,13 @@ internal sealed class GpuPortalOverlay : IDisposable
             lastPresentedCenter = screenCenter;
             lastPresentedSourceBounds = sourceBounds;
             presentedCaptureSerial = captureSerial;
+            presentedCompositionOrderSerial = orderSerial;
+            if (pendingOrderSourceWindow != nint.Zero)
+            {
+                pendingOrderSourceWindow = nint.Zero;
+                pendingOrderSourceFrameSerial = 0;
+                pendingOrderDeadlineTimestamp = 0;
+            }
         }
 
         error = null;
@@ -633,6 +702,12 @@ internal sealed class GpuPortalOverlay : IDisposable
             latestCaptureSerial = 0;
             presentedCaptureSerial = 0;
             presentedFrames = 0;
+            compositionOrderSerial = 0;
+            presentedCompositionOrderSerial = 0;
+            pendingOrderCaptureSerial = 0;
+            pendingOrderSourceWindow = nint.Zero;
+            pendingOrderSourceFrameSerial = 0;
+            pendingOrderDeadlineTimestamp = 0;
             displayPlacementCount = 0;
             captureFailure = null;
         }
@@ -741,6 +816,7 @@ internal sealed class GpuPortalOverlay : IDisposable
                 }
 
                 resources.Context.CopyResource(captureSource.Texture, sourceTexture);
+                captureSource.FrameSerial++;
                 Interlocked.Increment(ref latestCaptureSerial);
             }
         }
@@ -832,6 +908,8 @@ internal sealed class GpuPortalOverlay : IDisposable
 
         internal ID3D11ShaderResourceView? TextureView { get; set; }
 
+        internal long FrameSerial { get; set; }
+
         internal static CaptureSource Create(
             nint window,
             IDirect3DDevice captureDevice)
@@ -896,14 +974,21 @@ internal sealed class GpuPortalOverlay : IDisposable
                 source => source.Window == sourceWindow);
             if (sourceIndex > 0)
             {
+                pendingOrderCaptureSerial = Interlocked.Read(
+                    ref latestCaptureSerial);
                 var promotedSource = captureSources[sourceIndex];
+                pendingOrderSourceWindow = promotedSource.Window;
+                pendingOrderSourceFrameSerial = promotedSource.FrameSerial;
+                pendingOrderDeadlineTimestamp = Stopwatch.GetTimestamp() +
+                    (long)(Stopwatch.Frequency *
+                           (OrderSwitchMaximumHoldMilliseconds / 1000d));
                 var reordered = MultilayerWindowResolver.PromoteToFront(
                     captureSources,
                     promotedSource);
                 captureSources.Clear();
                 captureSources.AddRange(reordered);
                 SourceWindow = sourceWindow;
-                Interlocked.Increment(ref latestCaptureSerial);
+                compositionOrderSerial++;
             }
         }
 

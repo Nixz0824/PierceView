@@ -386,6 +386,11 @@ internal static class Program
                 {
                     Console.WriteLine(
                         $"受限层级提升：次数={visualOverlay.BackgroundPromotionCount}。");
+                    Console.WriteLine(
+                        $"视觉/输入层级同步：{visualOverlay.IsPhysicalSourceOrderSynchronized}，" +
+                        $"真实 -1 HWND=0x{visualOverlay.PhysicallySelectedSourceWindow:X}。");
+                    Console.WriteLine(
+                        $"物理后台顺序恢复：次数={visualOverlay.PhysicalOrderRecoveryCount}。");
                 }
             }
         }

@@ -146,6 +146,50 @@ internal static class SelfTests
                        sourceIsTopmost: false) == host;
         }, failures, ref total);
 
+        Check("深层交换等待被提升来源新帧", () =>
+        {
+            return GpuPortalOverlay.ShouldHoldCompositionOrderSwitch(
+                       presentedOrderSerial: 2,
+                       currentOrderSerial: 3,
+                       captureSerial: 41,
+                       orderStartCaptureSerial: 41,
+                       currentPromotedSourceFrameSerial: 8,
+                       orderStartPromotedSourceFrameSerial: 8,
+                       holdDeadlineExpired: false) &&
+                   GpuPortalOverlay.ShouldHoldCompositionOrderSwitch(
+                       presentedOrderSerial: 2,
+                       currentOrderSerial: 3,
+                       captureSerial: 42,
+                       orderStartCaptureSerial: 41,
+                       currentPromotedSourceFrameSerial: 8,
+                       orderStartPromotedSourceFrameSerial: 8,
+                       holdDeadlineExpired: false) &&
+                   !GpuPortalOverlay.ShouldHoldCompositionOrderSwitch(
+                       presentedOrderSerial: 2,
+                       currentOrderSerial: 3,
+                       captureSerial: 42,
+                       orderStartCaptureSerial: 41,
+                       currentPromotedSourceFrameSerial: 9,
+                       orderStartPromotedSourceFrameSerial: 8,
+                       holdDeadlineExpired: false) &&
+                   !GpuPortalOverlay.ShouldHoldCompositionOrderSwitch(
+                       presentedOrderSerial: 2,
+                       currentOrderSerial: 3,
+                       captureSerial: 41,
+                       orderStartCaptureSerial: 41,
+                       currentPromotedSourceFrameSerial: 8,
+                       orderStartPromotedSourceFrameSerial: 8,
+                       holdDeadlineExpired: true) &&
+                   !GpuPortalOverlay.ShouldHoldCompositionOrderSwitch(
+                       presentedOrderSerial: 3,
+                       currentOrderSerial: 3,
+                       captureSerial: 41,
+                       orderStartCaptureSerial: 41,
+                       currentPromotedSourceFrameSerial: 8,
+                       orderStartPromotedSourceFrameSerial: 8,
+                       holdDeadlineExpired: false);
+        }, failures, ref total);
+
         Check(
             "十六进制窗口句柄",
             () => PortalOptions.ParseWindowHandle("0x1234") == 0x1234,

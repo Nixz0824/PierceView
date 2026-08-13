@@ -44,6 +44,21 @@ internal sealed class ForegroundZOrderGuard : IDisposable
 
     internal int PromotionCount { get; private set; }
 
+    internal int PhysicalOrderRecoveryCount { get; private set; }
+
+    internal nint SelectedSourceWindow => _sourceWindow;
+
+    internal bool IsSelectedSourceFrontmost
+    {
+        get
+        {
+            lock (_recoveryGate)
+            {
+                return IsSelectedSourceFrontmostCore();
+            }
+        }
+    }
+
     internal bool TryEnable(
         nint sourceWindow,
         nint protectedWindow,
@@ -72,6 +87,7 @@ internal sealed class ForegroundZOrderGuard : IDisposable
         RecoveryCount = 0;
         ImmediateClampCount = 0;
         PromotionCount = 0;
+        PhysicalOrderRecoveryCount = 0;
 
         var distinctSources = sourceWindows
             .Where(window => window != nint.Zero)
@@ -195,7 +211,7 @@ internal sealed class ForegroundZOrderGuard : IDisposable
 
             var sourceChanged = _sourceWindow != root;
             _sourceWindow = root;
-            if (sourceChanged)
+            if (!IsSelectedSourceFrontmostCore())
             {
                 if (!NativeMethods.SetWindowPos(
                         root,
@@ -215,6 +231,16 @@ internal sealed class ForegroundZOrderGuard : IDisposable
                     return false;
                 }
 
+                if (!IsSelectedSourceFrontmostCore())
+                {
+                    error =
+                        "Windows 已接受层级调整请求，但选中的窗口仍未成为真实 -1。";
+                    return false;
+                }
+            }
+
+            if (sourceChanged)
+            {
                 PromotionCount++;
             }
         }
@@ -242,7 +268,9 @@ internal sealed class ForegroundZOrderGuard : IDisposable
         }
 
         var foreground = NativeMethods.GetForegroundWindow();
-        if (BelongsToSourceApplication(foreground) || IsSourceApplicationAboveHost())
+        if (BelongsToSourceApplication(foreground) ||
+            IsSourceApplicationAboveHost() ||
+            !IsSelectedSourceFrontmost)
         {
             TryClampImmediately(foreground);
             QueueProtectedPositionRecovery(foreground);
@@ -374,8 +402,28 @@ internal sealed class ForegroundZOrderGuard : IDisposable
                         nint.Zero);
                     var foreground = NativeMethods.GetForegroundWindow();
                     var foregroundIsSource = BelongsToSourceApplication(foreground);
-                    if (!foregroundIsSource && !IsSourceApplicationAboveHost())
+                    var sourceIsAboveHost = IsSourceApplicationAboveHost();
+                    var selectedOrderLost = !IsSelectedSourceFrontmostCore();
+                    if (!foregroundIsSource &&
+                        !sourceIsAboveHost &&
+                        !selectedOrderLost)
                     {
+                        continue;
+                    }
+
+                    // A source can reorder another captured source without ever
+                    // crossing the temporary topmost host barrier. Repair that
+                    // physical background order without stealing focus or
+                    // running the heavier foreground recovery path.
+                    if (selectedOrderLost &&
+                        !foregroundIsSource &&
+                        !sourceIsAboveHost)
+                    {
+                        MoveBehindProtectedWindow(_sourceWindow);
+                        if (IsSelectedSourceFrontmostCore())
+                        {
+                            PhysicalOrderRecoveryCount++;
+                        }
                         continue;
                     }
 
@@ -420,7 +468,11 @@ internal sealed class ForegroundZOrderGuard : IDisposable
 
             var foregroundIsSource = BelongsToSourceApplication(
                 NativeMethods.GetForegroundWindow());
-            if (!foregroundIsSource && !IsSourceApplicationAboveHost())
+            var sourceIsAboveHost = IsSourceApplicationAboveHost();
+            var selectedOrderLost = !IsSelectedSourceFrontmostCore();
+            if (!foregroundIsSource &&
+                !sourceIsAboveHost &&
+                !selectedOrderLost)
             {
                 return;
             }
@@ -563,6 +615,33 @@ internal sealed class ForegroundZOrderGuard : IDisposable
         }
 
         return false;
+    }
+
+    private bool IsSelectedSourceFrontmostCore()
+    {
+        if (_sourceWindow == nint.Zero ||
+            !NativeMethods.IsWindow(_sourceWindow))
+        {
+            return false;
+        }
+
+        // GW_HWNDPREV walks towards the front of the global Z-order. The host
+        // and the transparent display surface may be above the source in the
+        // topmost band; only another captured source above the selected one is
+        // a visual/input ordering mismatch.
+        for (var window = NativeMethods.GetWindow(
+                 _sourceWindow,
+                 NativeMethods.GwHwndPrevious);
+             window != nint.Zero;
+             window = NativeMethods.GetWindow(window, NativeMethods.GwHwndPrevious))
+        {
+            if (_sourceWindows.Contains(window))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private bool BelongsToSourceApplication(nint window)
