@@ -380,6 +380,8 @@ internal static class Program
             {
                 Thread.Sleep(durationMilliseconds);
                 Console.WriteLine($"前台焦点守卫：回滚次数={visualOverlay.ForegroundRecoveryCount}。");
+                Console.WriteLine(
+                    $"前台快速钳制：次数={visualOverlay.ImmediateForegroundClampCount}。");
                 if (reportPromotion)
                 {
                     Console.WriteLine(

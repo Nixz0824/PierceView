@@ -52,6 +52,13 @@ internal sealed class AdaptivePortalOverlay : IDisposable
         _ => 0,
     };
 
+    internal int ImmediateForegroundClampCount => activeBackend switch
+    {
+        ActiveBackend.Gpu => gpuOverlay?.ImmediateForegroundClampCount ?? 0,
+        ActiveBackend.Cpu => cpuOverlay.ImmediateForegroundClampCount,
+        _ => 0,
+    };
+
     internal int VisualPlacementCount => activeBackend switch
     {
         ActiveBackend.Gpu => gpuOverlay?.DisplayPlacementCount ?? 0,

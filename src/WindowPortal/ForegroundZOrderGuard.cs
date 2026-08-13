@@ -11,16 +11,18 @@ namespace WindowPortal;
 internal sealed class ForegroundZOrderGuard : IDisposable
 {
     private const uint EventSystemForeground = 0x0003;
+    private const uint EventObjectReorder = 0x8004;
     private const uint WineventOutOfContext = 0x0000;
     private const uint WineventSkipOwnProcess = 0x0002;
-    private const int RecoverySettlePasses = 4;
-    private const int RecoverySettleMilliseconds = 8;
+    private const int RecoveryFollowUpPasses = 8;
+    private const int RecoveryFollowUpMilliseconds = 2;
 
     private readonly NativeMethods.WinEventCallback _eventCallback;
     private readonly NonActivatingWindowGuard _interactionGuard = new();
     private readonly object _recoveryGate = new();
     private readonly ManualResetEventSlim _recoveryIdle = new(initialState: true);
     private nint _eventHook;
+    private nint _reorderEventHook;
     private nint _protectedWindow;
     private nint _sourceWindow;
     private nint[] _sourceWindows = [];
@@ -35,6 +37,8 @@ internal sealed class ForegroundZOrderGuard : IDisposable
     }
 
     internal int RecoveryCount { get; private set; }
+
+    internal int ImmediateClampCount { get; private set; }
 
     internal int PromotionCount { get; private set; }
 
@@ -64,6 +68,7 @@ internal sealed class ForegroundZOrderGuard : IDisposable
         _ = portalRadius;
         Restore();
         RecoveryCount = 0;
+        ImmediateClampCount = 0;
         PromotionCount = 0;
 
         var distinctSources = sourceWindows
@@ -118,6 +123,22 @@ internal sealed class ForegroundZOrderGuard : IDisposable
             return false;
         }
 
+        _reorderEventHook = NativeMethods.SetWinEventHook(
+            EventObjectReorder,
+            EventObjectReorder,
+            nint.Zero,
+            _eventCallback,
+            0,
+            0,
+            WineventOutOfContext | WineventSkipOwnProcess);
+        if (_reorderEventHook == nint.Zero)
+        {
+            var hookError = Marshal.GetLastPInvokeError();
+            error = Win32Error("无法监听后台窗口层级变化", hookError);
+            Restore();
+            return false;
+        }
+
         error = null;
         return true;
     }
@@ -145,34 +166,37 @@ internal sealed class ForegroundZOrderGuard : IDisposable
             }
 
             _sourceWindow = root;
-            if (GetFirstVisibleWindowBehindHost() == root)
+            if (GetFirstVisibleWindowBehindHost() != root)
             {
-                error = null;
-                return true;
-            }
+                if (!NativeMethods.SetWindowPos(
+                        root,
+                        _protectedWindow,
+                        0,
+                        0,
+                        0,
+                        0,
+                        NativeMethods.SwpNoMove |
+                        NativeMethods.SwpNoSize |
+                        NativeMethods.SwpNoActivate |
+                        NativeMethods.SwpNoOwnerZOrder))
+                {
+                    error = Win32Error(
+                        "无法把选中的深层窗口移动到宿主后方",
+                        Marshal.GetLastPInvokeError());
+                    return false;
+                }
 
-            if (!NativeMethods.SetWindowPos(
-                    root,
-                    _protectedWindow,
-                    0,
-                    0,
-                    0,
-                    0,
-                    NativeMethods.SwpNoMove |
-                    NativeMethods.SwpNoSize |
-                    NativeMethods.SwpNoActivate |
-                    NativeMethods.SwpNoOwnerZOrder))
-            {
-                error = Win32Error(
-                    "无法把选中的深层窗口移动到宿主后方",
-                    Marshal.GetLastPInvokeError());
-                return false;
+                PromotionCount++;
             }
-
-            PromotionCount++;
-            error = null;
-            return true;
         }
+
+        // The native mouse-down may be followed by several activation attempts
+        // from the target application. Start an immediate + short follow-up
+        // watch even when the selected source was already the current -1.
+        TryClampImmediately(root);
+        QueueProtectedPositionRecovery(root);
+        error = null;
+        return true;
     }
 
     internal void UpdatePortalGeometry(NativeMethods.Point center, int radius)
@@ -191,6 +215,7 @@ internal sealed class ForegroundZOrderGuard : IDisposable
         var foreground = NativeMethods.GetForegroundWindow();
         if (BelongsToSourceApplication(foreground) || IsSourceApplicationAboveHost())
         {
+            TryClampImmediately(foreground);
             QueueProtectedPositionRecovery(foreground);
         }
     }
@@ -202,6 +227,13 @@ internal sealed class ForegroundZOrderGuard : IDisposable
         if (eventHook != nint.Zero)
         {
             _ = NativeMethods.UnhookWinEvent(eventHook);
+        }
+
+        var reorderEventHook = _reorderEventHook;
+        _reorderEventHook = nint.Zero;
+        if (reorderEventHook != nint.Zero)
+        {
+            _ = NativeMethods.UnhookWinEvent(reorderEventHook);
         }
 
         _ = _recoveryIdle.Wait(500);
@@ -244,8 +276,15 @@ internal sealed class ForegroundZOrderGuard : IDisposable
         _ = eventTime;
         try
         {
-            if (hook == _eventHook && BelongsToSourceApplication(window))
+            if ((hook == _eventHook || hook == _reorderEventHook) &&
+                BelongsToSourceApplication(window))
             {
+                // WINEVENT_OUTOFCONTEXT is already delivered asynchronously.
+                // Recover on this callback turn whenever the gate is free so a
+                // 260 Hz compositor does not get an 8 ms window to show the
+                // source above the protected host. The worker below remains as
+                // a non-blocking fallback for repeated activation attempts.
+                TryClampImmediately(window);
                 QueueProtectedPositionRecovery(window);
             }
         }
@@ -280,14 +319,17 @@ internal sealed class ForegroundZOrderGuard : IDisposable
     {
         try
         {
-            // A single native click can run Activate/BringWindowToTop/
-            // SetForegroundWindow back-to-back. Recovering on the first event can
-            // therefore land before the source application completes its own
-            // activation sequence. Settle and recheck a few times on this worker
-            // thread so the final state, not an intermediate event, wins.
-            for (var pass = 0; pass < RecoverySettlePasses; pass++)
+            // Pass zero runs without a forced sleep. Follow-up passes then watch
+            // the short activation burst at sub-frame intervals. This preserves
+            // the old eventual recovery guarantee without guaranteeing one or
+            // two visible frames of foreground exposure on high-refresh panels.
+            for (var pass = 0; pass < RecoveryFollowUpPasses; pass++)
             {
-                Thread.Sleep(RecoverySettleMilliseconds);
+                if (pass > 0)
+                {
+                    Thread.Sleep(RecoveryFollowUpMilliseconds);
+                }
+
                 lock (_recoveryGate)
                 {
                     if (_eventHook == nint.Zero)
@@ -326,6 +368,48 @@ internal sealed class ForegroundZOrderGuard : IDisposable
             {
                 _recoveryIdle.Set();
             }
+        }
+    }
+
+    private void TryClampImmediately(nint preferredWindow)
+    {
+        if (_eventHook == nint.Zero || _restoringForeground ||
+            !Monitor.TryEnter(_recoveryGate))
+        {
+            return;
+        }
+
+        try
+        {
+            if (_eventHook == nint.Zero || _restoringForeground)
+            {
+                return;
+            }
+
+            var foregroundIsSource = BelongsToSourceApplication(
+                NativeMethods.GetForegroundWindow());
+            if (!foregroundIsSource && !IsSourceApplicationAboveHost())
+            {
+                return;
+            }
+
+            var clampWindow = BelongsToSourceApplication(preferredWindow)
+                ? preferredWindow
+                : _sourceWindow;
+            var rootOwner = NativeMethods.GetAncestor(
+                clampWindow,
+                NativeMethods.GaRootOwner);
+            if (rootOwner != nint.Zero && rootOwner != _protectedWindow)
+            {
+                MoveBehindProtectedWindow(rootOwner);
+            }
+
+            MoveBehindProtectedWindow(_sourceWindow);
+            ImmediateClampCount++;
+        }
+        finally
+        {
+            Monitor.Exit(_recoveryGate);
         }
     }
 

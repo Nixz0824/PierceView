@@ -57,6 +57,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 
 		internal int ForegroundRecoveryCount => _foregroundGuard.RecoveryCount;
 
+		internal int ImmediateForegroundClampCount => _foregroundGuard.ImmediateClampCount;
+
 		internal int BackgroundPromotionCount => _foregroundGuard.PromotionCount;
 
 		internal int CaptureSourceUpdateCount => _capture?.SourceUpdateCount ?? 0;
@@ -1423,6 +1425,8 @@ internal sealed class DwmPortalOverlay : IDisposable
 	internal nint SourceWindow => Invoke(static manager => manager.SourceWindow);
 
 	internal int ForegroundRecoveryCount => Invoke(static manager => manager.ForegroundRecoveryCount);
+
+	internal int ImmediateForegroundClampCount => Invoke(static manager => manager.ImmediateForegroundClampCount);
 
 	internal int BackgroundPromotionCount => Invoke(static manager => manager.BackgroundPromotionCount);
 

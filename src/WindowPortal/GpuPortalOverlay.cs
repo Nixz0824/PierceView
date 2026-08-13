@@ -289,6 +289,9 @@ internal sealed class GpuPortalOverlay : IDisposable
 
     internal int ForegroundRecoveryCount => foregroundGuard.RecoveryCount;
 
+    internal int ImmediateForegroundClampCount =>
+        foregroundGuard.ImmediateClampCount;
+
     internal int BackgroundPromotionCount => foregroundGuard.PromotionCount;
 
     internal long CapturedFrames => Interlocked.Read(ref latestCaptureSerial);

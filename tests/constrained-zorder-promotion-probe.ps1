@@ -322,6 +322,7 @@ try {
     $portalExitCode = $portalProcess.ExitCode
     $portalLogText = [string](Get-Content -LiteralPath $portalOutput -Raw)
     $recoveryMatch = [regex]::Match($portalLogText, '回滚次数=(\d+)')
+    $immediateClampMatch = [regex]::Match($portalLogText, '前台快速钳制：次数=(\d+)')
     $promotionMatch = [regex]::Match($portalLogText, '受限层级提升：次数=(\d+)')
     $foregroundRecoveryCount = if ($recoveryMatch.Success) {
         [int]$recoveryMatch.Groups[1].Value
@@ -331,6 +332,12 @@ try {
     }
     $promotionCount = if ($promotionMatch.Success) {
         [int]$promotionMatch.Groups[1].Value
+    }
+    else {
+        0
+    }
+    $immediateClampCount = if ($immediateClampMatch.Success) {
+        [int]$immediateClampMatch.Groups[1].Value
     }
     else {
         0
@@ -374,6 +381,7 @@ try {
     Write-Output "DEEP_NO_ACTIVATE_APPLIED=$deepNoActivateApplied"
     Write-Output "STYLES_RESTORED=$stylesRestored"
     Write-Output "FOREGROUND_RECOVERY_COUNT=$foregroundRecoveryCount"
+    Write-Output "IMMEDIATE_FOREGROUND_CLAMP_COUNT=$immediateClampCount"
     Write-Output "PROMOTION_COUNT=$promotionCount"
     Write-Output "RETURNED_SHALLOW_DIRECTLY_BELOW=$returnedShallowDirectlyBelow"
     Write-Output "SECOND_CLICK_FORWARDED=$secondClickForwarded"

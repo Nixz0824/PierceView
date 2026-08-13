@@ -6,6 +6,13 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 ## [Unreleased]
 
+### 2.3.0-multilayer-alpha.3 (local experimental build)
+
+- 修复点击后台应用或其内容时，来源应用整体界面可能在桌面最前方闪现一两帧：同时监听 WinEvent 前台切换与窗口重排，事件到达后立即把来源窗口钳制回宿主后方，不再固定等待 8 ms 后才首次恢复。
+- Fix a one-to-two-frame whole-window foreground flash after clicking a background app or its content. Watch both WinEvent foreground changes and window reordering, then immediately clamp the source behind the host instead of waiting a fixed 8 ms before the first recovery.
+- 保留异步恢复兜底，并把后续复查改为 2 ms 间隔的短时窗口，以覆盖应用在一次原生点击中连续发起的激活/置前动作；不改四层 WGC 合成、固定 DirectComposition 显示层或原生输入路径。
+- Keep asynchronous recovery as a fallback with a short 2 ms follow-up window for repeated activation attempts during one native click. The four-source WGC compositor, fixed DirectComposition surface, and native input path remain unchanged.
+
 ### 2.3.0-multilayer-alpha.2 (local experimental build)
 
 - 新增可见深层窗口的受限 Z-order 提升：真实左键按下时识别 Windows 实际命中的已捕获窗口，只把它移动为宿主正后方的新 `-1`，绝不越过宿主到桌面最前面；其他后台来源保持相对顺序后移。
