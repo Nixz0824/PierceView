@@ -38,6 +38,27 @@ internal sealed class AdaptivePortalOverlay : IDisposable
     internal bool IsGpuActive =>
         activeBackend == ActiveBackend.Gpu && gpuOverlay?.IsVisible == true;
 
+    internal string ActiveBackendName => activeBackend switch
+    {
+        ActiveBackend.Gpu => "GPU/WGC",
+        ActiveBackend.Cpu => "CPU/DWM",
+        _ => "None",
+    };
+
+    internal int ForegroundRecoveryCount => activeBackend switch
+    {
+        ActiveBackend.Gpu => gpuOverlay?.ForegroundRecoveryCount ?? 0,
+        ActiveBackend.Cpu => cpuOverlay.ForegroundRecoveryCount,
+        _ => 0,
+    };
+
+    internal int VisualPlacementCount => activeBackend switch
+    {
+        ActiveBackend.Gpu => gpuOverlay?.DisplayPlacementCount ?? 0,
+        ActiveBackend.Cpu => cpuOverlay.DisplayRelocationCount,
+        _ => 0,
+    };
+
     internal nint SourceWindow => activeBackend switch
     {
         ActiveBackend.Gpu => gpuOverlay?.SourceWindow ?? nint.Zero,

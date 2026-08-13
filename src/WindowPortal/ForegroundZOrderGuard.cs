@@ -13,6 +13,8 @@ internal sealed class ForegroundZOrderGuard : IDisposable
     private const uint EventSystemForeground = 0x0003;
     private const uint WineventOutOfContext = 0x0000;
     private const uint WineventSkipOwnProcess = 0x0002;
+    private const int RecoverySettlePasses = 4;
+    private const int RecoverySettleMilliseconds = 8;
 
     private readonly NativeMethods.WinEventCallback _eventCallback;
     private readonly NonActivatingWindowGuard _interactionGuard = new();
@@ -193,35 +195,52 @@ internal sealed class ForegroundZOrderGuard : IDisposable
     {
         try
         {
-            lock (_recoveryGate)
+            // A single native click can run Activate/BringWindowToTop/
+            // SetForegroundWindow back-to-back. Recovering on the first event can
+            // therefore land before the source application completes its own
+            // activation sequence. Settle and recheck a few times on this worker
+            // thread so the final state, not an intermediate event, wins.
+            for (var pass = 0; pass < RecoverySettlePasses; pass++)
             {
-                if (_eventHook == nint.Zero)
+                Thread.Sleep(RecoverySettleMilliseconds);
+                lock (_recoveryGate)
                 {
-                    return;
-                }
+                    if (_eventHook == nint.Zero)
+                    {
+                        return;
+                    }
 
-                var requestedWindow = Interlocked.Exchange(
-                    ref _pendingForegroundWindow,
-                    nint.Zero);
-                var foreground = NativeMethods.GetForegroundWindow();
-                var foregroundIsSource = BelongsToSourceApplication(foreground);
-                if (!foregroundIsSource && !IsSourceApplicationAboveHost())
-                {
-                    return;
-                }
+                    var requestedWindow = Interlocked.Exchange(
+                        ref _pendingForegroundWindow,
+                        nint.Zero);
+                    var foreground = NativeMethods.GetForegroundWindow();
+                    var foregroundIsSource = BelongsToSourceApplication(foreground);
+                    if (!foregroundIsSource && !IsSourceApplicationAboveHost())
+                    {
+                        continue;
+                    }
 
-                var recoveryWindow = BelongsToSourceApplication(requestedWindow)
-                    ? requestedWindow
-                    : foregroundIsSource
-                        ? foreground
-                        : _sourceWindow;
-                RestoreProtectedPosition(recoveryWindow);
+                    var recoveryWindow = BelongsToSourceApplication(requestedWindow)
+                        ? requestedWindow
+                        : foregroundIsSource
+                            ? foreground
+                            : _sourceWindow;
+                    RestoreProtectedPosition(recoveryWindow);
+                }
             }
         }
         finally
         {
             Volatile.Write(ref _recoveryQueued, 0);
-            _recoveryIdle.Set();
+            var pendingWindow = Volatile.Read(ref _pendingForegroundWindow);
+            if (_eventHook != nint.Zero && pendingWindow != nint.Zero)
+            {
+                QueueProtectedPositionRecovery(pendingWindow);
+            }
+            else
+            {
+                _recoveryIdle.Set();
+            }
         }
     }
 

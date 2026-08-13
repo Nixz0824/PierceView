@@ -10,13 +10,18 @@ internal static class Program
     }
 }
 
-internal sealed record TestTargetOptions(string Label, Color? SolidColor, bool Passive)
+internal sealed record TestTargetOptions(
+    string Label,
+    Color? SolidColor,
+    bool Passive,
+    bool Animate)
 {
     internal static TestTargetOptions Parse(string[] args)
     {
         var label = "WindowPortal Region Test Target";
         Color? solidColor = null;
         var passive = false;
+        var animate = false;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -31,11 +36,14 @@ internal sealed record TestTargetOptions(string Label, Color? SolidColor, bool P
                 case "--passive":
                     passive = true;
                     break;
+                case "--animate":
+                    animate = true;
+                    break;
                 default:
                     throw new ArgumentException($"Unknown test target argument: {args[index]}");
             }
         }
 
-        return new TestTargetOptions(label, solidColor, passive);
+        return new TestTargetOptions(label, solidColor, passive, animate);
     }
 }

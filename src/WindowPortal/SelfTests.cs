@@ -43,30 +43,15 @@ internal static class SelfTests
             return options.GpuPortalSmokeWindow == 0x1234;
         }, failures, ref total);
 
-        Check("GPU 稳定画布安全边界", () =>
+        Check("GPU 固定虚拟屏幕坐标", () =>
         {
-            var geometry = PortalGeometry.Circle(204, 24);
-            var initialCenter = new NativeMethods.Point(1000, 800);
-            var canvasWidth = geometry.FrameWidth +
-                              (GpuPortalOverlay.OverscanMargin * 2);
-            var canvasHeight = geometry.FrameHeight +
-                               (GpuPortalOverlay.OverscanMargin * 2);
-            var canvas = GpuPortalOverlay.CreateCenteredCanvasBounds(
-                initialCenter,
-                canvasWidth,
-                canvasHeight);
-            var insideCenter = new NativeMethods.Point(
-                initialCenter.X + GpuPortalOverlay.OverscanMargin,
-                initialCenter.Y - GpuPortalOverlay.OverscanMargin);
-            var outsideCenter = new NativeMethods.Point(
-                insideCenter.X + 1,
-                insideCenter.Y);
-            return GpuPortalOverlay.Contains(
-                       canvas,
-                       geometry.CreateFrameBounds(insideCenter)) &&
-                   !GpuPortalOverlay.Contains(
-                       canvas,
-                       geometry.CreateFrameBounds(outsideCenter));
+            var canvas = GpuPortalOverlay.CreateVirtualCanvasBounds(
+                new System.Drawing.Rectangle(-1920, -240, 4480, 1680));
+            var local = GpuPortalOverlay.ToCanvasCoordinates(
+                canvas,
+                new NativeMethods.Point(120, 860));
+            return canvas == new NativeMethods.Rect(-1920, -240, 2560, 1440) &&
+                   local == new NativeMethods.Point(2040, 1100);
         }, failures, ref total);
 
         Check(

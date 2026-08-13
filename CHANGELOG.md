@@ -6,9 +6,16 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 ## [Unreleased]
 
-### Documentation
+### GPU development / GPU 开发
 
-- （暂无）
+- `2.2.0-gpu-alpha.1` 从公开的 2.1.0 CPU 终版重新建立 GPU 开发线，保留固定 CPU 显示层、单轮单次提交、32 像素交互孔与 16 像素锚定阈值作为回退基线。
+- Rebase `2.2.0-gpu-alpha.1` on the public 2.1.0 CPU final build, preserving its fixed CPU display surface, one presentation per update, 32 px input aperture, and 16 px anchoring threshold as the fallback baseline.
+- GPU 的 WGC → D3D11 → HLSL → DirectComposition 路径改为一次 F8 会话只定位一次虚拟屏幕顶层 HWND；鼠标移动只更新 portal-sized viewport 和着色器坐标，移除 192 像素小画布的跨界移动与旧位置闪现来源。
+- Keep the GPU WGC → D3D11 → HLSL → DirectComposition path on one virtual-screen top-level HWND placement per F8 session. Pointer motion updates only the portal-sized viewport and shader coordinates, removing 192 px small-canvas relocations and their stale-position flash source.
+- GPU 覆盖窗保持 `WS_EX_LAYERED | WS_EX_TRANSPARENT`、`HTTRANSPARENT` 与 `MA_NOACTIVATE`；独立前台守卫心跳不再依赖鼠标移动或下一次渲染。
+- Retain `WS_EX_LAYERED | WS_EX_TRANSPARENT`, `HTTRANSPARENT`, and `MA_NOACTIVATE` on the GPU overlay, with an independent foreground-guard heartbeat that does not depend on pointer motion or another render tick.
+- 260Hz 实机动态来源测试：4 秒 WGC 新帧 `211`、GPU 提交 `860`、顶层显示定位 `1` 次，P95 `0.13ms`、P99 `0.22ms`、最慢 `3.50ms`；后台点击、滚轮独占、前台与 Z-order 保护连续 3 轮通过。
+- On the 260Hz test system with a dynamic source: 4 seconds produce `211` new WGC frames, `860` GPU presents, and one top-level display placement; P95 is `0.13ms`, P99 `0.22ms`, and maximum `3.50ms`. Background click, wheel exclusivity, foreground preservation, and Z-order protection pass three consecutive runs.
 
 ## [2.1.0] - 2026-08-11
 

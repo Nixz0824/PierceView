@@ -91,26 +91,27 @@ internal static class GpuPortalSmokeTests
                 highResolutionWaiter.Wait(2);
             }
 
-            var safeCanvasRelocations = overlay.CanvasRelocationCount;
-            var relocationDistance = GpuPortalOverlay.OverscanMargin * 2 + 64;
-            var relocationPoints = new[]
+            var displayPlacementsBeforeTraversal = overlay.DisplayPlacementCount;
+            var traversalPoints = new[]
             {
-                new NativeMethods.Point(center.X + relocationDistance, center.Y),
-                new NativeMethods.Point(center.X - relocationDistance, center.Y),
+                new NativeMethods.Point(sourceBounds.Left + 48, sourceBounds.Top + 48),
+                new NativeMethods.Point(sourceBounds.Right - 48, sourceBounds.Top + 48),
+                new NativeMethods.Point(sourceBounds.Right - 48, sourceBounds.Bottom - 48),
+                new NativeMethods.Point(sourceBounds.Left + 48, sourceBounds.Bottom - 48),
                 center,
             };
-            foreach (var relocationPoint in relocationPoints)
+            foreach (var traversalPoint in traversalPoints)
             {
-                if (!overlay.TryUpdate(relocationPoint, out var relocationError))
+                if (!overlay.TryUpdate(traversalPoint, out var traversalError))
                 {
-                    Console.Error.WriteLine(relocationError);
+                    Console.Error.WriteLine(traversalError);
                     return 17;
                 }
 
-                if (!overlay.IsSkippedBySystemHitTestAt(relocationPoint))
+                if (!overlay.IsSkippedBySystemHitTestAt(traversalPoint))
                 {
                     Console.Error.WriteLine(
-                        "GPU 画布重定位后重新成为系统鼠标命中目标。");
+                        "GPU 固定显示层在跨区域移动后重新成为系统鼠标命中目标。");
                     return 17;
                 }
 
@@ -119,8 +120,8 @@ internal static class GpuPortalSmokeTests
 
             var capturedFrames = overlay.CapturedFrames;
             var presentedFrames = overlay.PresentedFrames;
-            var canvasRelocations = overlay.CanvasRelocationCount;
-            var boundaryRelocations = canvasRelocations - safeCanvasRelocations;
+            var displayPlacements = overlay.DisplayPlacementCount;
+            var displayBounds = overlay.DisplayBounds;
             updateDurations.Sort();
             var p95 = Percentile(updateDurations, 0.95);
             var p99 = Percentile(updateDurations, 0.99);
@@ -128,8 +129,8 @@ internal static class GpuPortalSmokeTests
             Console.WriteLine(
                 $"调度={updates}，WGC 新帧={capturedFrames}，" +
                 $"GPU 透视提交={presentedFrames}，" +
-                $"安全范围重定位={safeCanvasRelocations}，" +
-                $"跨界重定位={boundaryRelocations}，" +
+                $"显示层定位={displayPlacements}，" +
+                $"虚拟屏幕={displayBounds.Width}x{displayBounds.Height}，" +
                 $"P95={p95:F2}ms，P99={p99:F2}ms，" +
                 $"最慢={maximumUpdateMilliseconds:F2}ms，" +
                 $"高精度定时={highResolutionWaiter.IsHighResolution}。");
@@ -139,28 +140,29 @@ internal static class GpuPortalSmokeTests
                 return 18;
             }
 
+            if (capturedFrames >= 2 && presentedFrames < capturedFrames)
+            {
+                Console.Error.WriteLine(
+                    $"GPU 未提交所有可用的动态 WGC 帧，捕获={capturedFrames}，提交={presentedFrames}。" );
+                return 18;
+            }
+
             if (!systemHitTestVerified)
             {
                 Console.Error.WriteLine("GPU 覆盖窗未完成系统命中跳过验证。");
                 return 18;
             }
 
-            if (safeCanvasRelocations > 1)
+            if (displayPlacementsBeforeTraversal != 1 ||
+                displayPlacements != 1)
             {
                 Console.Error.WriteLine(
-                    $"192px 安全边界内不应重复移动 GPU 窗口，实际={safeCanvasRelocations}。");
-                return 18;
-            }
-
-            if (boundaryRelocations < 2)
-            {
-                Console.Error.WriteLine(
-                    $"GPU 冒烟未覆盖跨安全边界重定位，实际={boundaryRelocations}。");
+                    $"一次 GPU 会话内显示层只能定位一次，遍历前={displayPlacementsBeforeTraversal}，最终={displayPlacements}。");
                 return 18;
             }
 
             Console.WriteLine(
-                "GPU 常驻纹理 + 稳定画布 + 输入穿透 + 羽化着色器冒烟通过。");
+                "GPU 常驻纹理 + 固定虚拟屏幕显示层 + 输入穿透 + 羽化着色器冒烟通过。");
             return 0;
         }
         catch (Exception exception)

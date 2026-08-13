@@ -7,9 +7,14 @@ $ErrorActionPreference = 'Stop'
 $workspace = Split-Path -Parent $PSScriptRoot
 $appProject = Join-Path $workspace 'src\WindowPortal\WindowPortal.csproj'
 $targetProject = Join-Path $workspace 'tests\WindowPortal.TestTarget\WindowPortal.TestTarget.csproj'
+$appTargetFramework = [string](dotnet msbuild $appProject -nologo -getProperty:TargetFramework)
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($appTargetFramework)) {
+    throw 'Could not resolve the PierceView target framework.'
+}
+
 $shouldBuildApp = [string]::IsNullOrWhiteSpace($AppExecutable)
 $resolvedAppExecutable = if ($shouldBuildApp) {
-    Join-Path $workspace 'src\WindowPortal\bin\Release\net8.0-windows\PierceView.exe'
+    Join-Path $workspace "src\WindowPortal\bin\Release\$($appTargetFramework.Trim())\PierceView.exe"
 }
 else {
     (Resolve-Path -LiteralPath $AppExecutable).Path

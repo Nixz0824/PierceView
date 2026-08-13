@@ -7,9 +7,10 @@ internal sealed class TestTargetForm : Form, IMessageFilter
 {
     private readonly Button _backgroundClickButton;
     private readonly TestTargetOptions _options;
+    private readonly System.Windows.Forms.Timer? _animationTimer;
     private int _backgroundClickCount;
-
     private int _wheelDelta;
+    private int _animationFrame;
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -67,6 +68,21 @@ internal sealed class TestTargetForm : Form, IMessageFilter
         Resize += (_, _) => PositionButton();
         Application.AddMessageFilter(this);
         UpdateWindowTitle();
+
+        if (options.Animate)
+        {
+            _animationTimer = new System.Windows.Forms.Timer
+            {
+                Interval = 8,
+                Enabled = true,
+            };
+            _animationTimer.Tick += (_, _) =>
+            {
+                _animationFrame++;
+                instructionLabel.Text =
+                    $"GPU WGC ANIMATION FRAME {_animationFrame:D6}";
+            };
+        }
     }
 
     public bool PreFilterMessage(ref Message message)
@@ -115,6 +131,7 @@ internal sealed class TestTargetForm : Form, IMessageFilter
     {
         if (disposing)
         {
+            _animationTimer?.Dispose();
             Application.RemoveMessageFilter(this);
         }
 

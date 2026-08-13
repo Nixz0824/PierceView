@@ -128,9 +128,9 @@ pwsh -File .\tests\tray-smoke-test.ps1
 GUI 子系统构建建议通过 DLL 运行诊断命令，以获得稳定的控制台输出。For GUI-subsystem builds, run diagnostics through the DLL for reliable console output.
 
 ```powershell
-dotnet .\src\WindowPortal\bin\Release\net8.0-windows\PierceView.dll --self-test
-dotnet .\src\WindowPortal\bin\Release\net8.0-windows\PierceView.dll --version
-dotnet .\src\WindowPortal\bin\Release\net8.0-windows\PierceView.dll --list-windows
+dotnet .\src\WindowPortal\bin\Release\net8.0-windows10.0.19041.0\PierceView.dll --self-test
+dotnet .\src\WindowPortal\bin\Release\net8.0-windows10.0.19041.0\PierceView.dll --version
+dotnet .\src\WindowPortal\bin\Release\net8.0-windows10.0.19041.0\PierceView.dll --list-windows
 ```
 
 ## 文档 / Documentation

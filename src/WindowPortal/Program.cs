@@ -137,7 +137,8 @@ internal static class Program
     private static int RunProbeMode(PortalOptions options, nint probeWindow)
     {
         using var controller = new WindowRegionController(options.Radius);
-        using var visualOverlay = new DwmPortalOverlay(options.Radius);
+        using var visualOverlay = new AdaptivePortalOverlay(
+            PortalGeometry.Circle(options.Radius));
         RegisterEmergencyRestoration(controller, visualOverlay);
         return RunProbe(
             controller,
@@ -149,7 +150,7 @@ internal static class Program
 
     private static int RunProbe(
         WindowRegionController controller,
-        DwmPortalOverlay visualOverlay,
+        AdaptivePortalOverlay visualOverlay,
         nint window,
         int durationMilliseconds,
         int radius)
@@ -236,8 +237,8 @@ internal static class Program
                         $"连续换帧：{frameTimes.Count} 帧，" +
                         $"平均={frameTimes.Average():F2}ms，最慢={frameTimes.Max():F2}ms。");
                     Console.WriteLine(
-                        $"DWM 来源重定位次数={visualOverlay.CaptureSourceUpdateCount}。" +
-                        "安全边界内移动只执行 CPU 对齐裁剪。");
+                        $"视觉后端={visualOverlay.ActiveBackendName}，" +
+                        $"顶层显示定位次数={visualOverlay.VisualPlacementCount}。");
                 }
             }
 
@@ -300,7 +301,7 @@ internal static class Program
 
     private static bool TryUpdateVisualPortal(
         WindowRegionController controller,
-        DwmPortalOverlay visualOverlay,
+        AdaptivePortalOverlay visualOverlay,
         NativeMethods.Point screenPoint,
         out string? error)
     {
@@ -328,7 +329,7 @@ internal static class Program
 
     private static void RegisterEmergencyRestoration(
         WindowRegionController controller,
-        DwmPortalOverlay visualOverlay)
+        AdaptivePortalOverlay visualOverlay)
     {
         Console.CancelKeyPress += (_, eventArgs) =>
         {
