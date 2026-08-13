@@ -1,8 +1,8 @@
 # 寸镜 / PierceView 2.3 多层实验版
 
-`2.3.0-multilayer-alpha.6` 是从公开稳定版 `2.2.0` 独立分支开发的本地测试版本，不替代 `2.2.0 GPU Edition` 或 `2.1.0 CPU Edition`。
+`2.3.0-multilayer-alpha.7` 是从公开稳定版 `2.2.0` 独立分支开发的本地测试版本，不替代 `2.2.0 GPU Edition` 或 `2.1.0 CPU Edition`。
 
-`2.3.0-multilayer-alpha.6` is a local test build developed on a separate branch from the public stable `2.2.0`. It does not replace the `2.2.0 GPU Edition` or `2.1.0 CPU Edition`.
+`2.3.0-multilayer-alpha.7` is a local test build developed on a separate branch from the public stable `2.2.0`. It does not replace the `2.2.0 GPU Edition` or `2.1.0 CPU Edition`.
 
 ## 本轮范围 / Scope
 
@@ -17,6 +17,7 @@
 - 深层交换期间短暂冻结最后一张完整有效合成帧，优先等待被提升来源的新 WGC 帧后再一次切换；最长等待 8 ms，避免静态窗口停住，同时减少独立捕获源的新旧帧中间态造成的偶发频闪。Briefly freeze the last complete composition during a deep-layer exchange and preferably switch once after the promoted source produces a fresh WGC frame. The hold is capped at 8 ms so static windows cannot stall while mixed old/new states across independent capture sources are less likely to flash.
 - F8 按住期间每 75 ms 校验已捕获来源；关闭或最小化一层后，从当前最深有效来源继续向后补齐到最多四层。正常会话不会主动改动仍有效的来源名单。仍有效的捕获与纹理继续复用，新来源首帧到达前保留最后一张完整画面。Validate captured sources every 75 ms while F8 is held. If one closes or minimizes, continue behind the deepest valid source to backfill up to four layers. Normal sessions do not proactively alter a still-valid source set. Reuse valid captures and textures, and retain the last complete composition until a replacement publishes its first frame.
 - 动态补位同步更新非激活样式、前台守卫和真实输入顺序；协调器不因普通 Z-order 变化重排仍有效的来源，因此不会覆盖深层点击已经建立的有效 `-1`。Synchronize non-activating styles, foreground protection, and real input order during backfill. Ordinary Z-order changes do not reorder still-valid captures, so reconciliation cannot overwrite the `-1` established by deep-window promotion.
+- 单路抓帧异常或一次动态补位失败只暂停该次更新：固定 DirectComposition 表面继续显示最后一张完整合成画面，失败来源或新补位在后续循环恢复，不让宿主应用短暂露出。A single-source frame error or one failed backfill only skips that update: the fixed DirectComposition surface keeps the last complete composition visible while the source or replacement recovers later, preventing the host application from briefly showing through.
 
 ## 暂未包含 / Not included yet
 

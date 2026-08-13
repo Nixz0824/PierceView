@@ -427,6 +427,9 @@ internal static class Program
                 Console.WriteLine(
                     $"动态来源协调：次数={visualOverlay.SourceReconciliationCount}，" +
                     $"新建捕获={visualOverlay.SourceReplacementCount}，" +
+                    $"保帧重试={visualOverlay.SourceReconciliationRetryCount}，" +
+                    $"已隔离帧异常={visualOverlay.RecoverableCaptureFailureCount}，" +
+                    $"已隔离更新异常={visualOverlay.RecoverableUpdateFailureCount}，" +
                     $"显示定位={visualOverlay.VisualPlacementCount}，" +
                     "最终来源=" + string.Join(
                         ',',

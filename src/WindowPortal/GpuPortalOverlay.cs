@@ -177,7 +177,9 @@ internal sealed class GpuPortalOverlay : IDisposable
     private volatile bool active;
     private bool windowShown;
     private bool disposed;
-    private string? captureFailure;
+    private int recoverableCaptureFailureCount;
+    private int recoverableUpdateFailureCount;
+    private int sourceReconciliationRetryCount;
 
     internal GpuPortalOverlay(PortalGeometry geometry)
     {
@@ -345,6 +347,15 @@ internal sealed class GpuPortalOverlay : IDisposable
     internal int SourceReplacementCount =>
         Volatile.Read(ref sourceReplacementCount);
 
+    internal int RecoverableCaptureFailureCount =>
+        Volatile.Read(ref recoverableCaptureFailureCount);
+
+    internal int RecoverableUpdateFailureCount =>
+        Volatile.Read(ref recoverableUpdateFailureCount);
+
+    internal int SourceReconciliationRetryCount =>
+        Volatile.Read(ref sourceReconciliationRetryCount);
+
     internal IReadOnlyList<nint> SourceWindows
     {
         get
@@ -459,10 +470,12 @@ internal sealed class GpuPortalOverlay : IDisposable
             displayPlacementCount = 0;
             sourceReconciliationCount = 0;
             sourceReplacementCount = 0;
+            recoverableCaptureFailureCount = 0;
+            recoverableUpdateFailureCount = 0;
+            sourceReconciliationRetryCount = 0;
             nextSourceReconciliationTimestamp = Stopwatch.GetTimestamp() +
                 (long)(Stopwatch.Frequency *
                        (SourceReconciliationMilliseconds / 1000d));
-            captureFailure = null;
             foreach (var source in captureSources)
             {
                 source.Session.StartCapture();
@@ -484,6 +497,32 @@ internal sealed class GpuPortalOverlay : IDisposable
         out string? error)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
+        try
+        {
+            return TryUpdateCore(screenCenter, out error);
+        }
+        catch (Exception exception)
+        {
+            if (active && windowShown && lastPresentedCenter is not null)
+            {
+                // The already-presented flip-model surface remains owned by
+                // DirectComposition. Keep it visible across an isolated D3D,
+                // WGC, or Win32 update exception and let the next loop retry.
+                _ = exception;
+                Interlocked.Increment(ref recoverableUpdateFailureCount);
+                error = null;
+                return true;
+            }
+
+            error = $"GPU 透视更新失败：{exception.Message}";
+            return false;
+        }
+    }
+
+    private bool TryUpdateCore(
+        NativeMethods.Point screenCenter,
+        out string? error)
+    {
         // WGC capture startup and the hidden DirectComposition HWND both originate
         // on this STA thread. Pump its queue without introducing a second visual
         // thread so FreeThreaded frame callbacks can begin immediately.
@@ -501,12 +540,6 @@ internal sealed class GpuPortalOverlay : IDisposable
 
         foregroundGuard.UpdatePortalGeometry(screenCenter, geometry.GuardRadius);
         foregroundGuard.EnsurePreserved();
-        if (Volatile.Read(ref captureFailure) is { } failure)
-        {
-            error = failure;
-            return false;
-        }
-
         lock (gpuLock)
         {
             if (captureSources.Count == 0)
@@ -748,8 +781,10 @@ internal sealed class GpuPortalOverlay : IDisposable
             displayPlacementCount = 0;
             sourceReconciliationCount = 0;
             sourceReplacementCount = 0;
+            recoverableCaptureFailureCount = 0;
+            recoverableUpdateFailureCount = 0;
+            sourceReconciliationRetryCount = 0;
             nextSourceReconciliationTimestamp = 0;
-            captureFailure = null;
         }
     }
 
@@ -864,16 +899,15 @@ internal sealed class GpuPortalOverlay : IDisposable
         {
             lock (gpuLock)
             {
-                // A removed source can already have queued one last callback.
-                // Disposing that source may make TryGetNextFrame throw, but it
-                // is an expected reconciliation race rather than a live GPU
-                // session failure. Report only failures from a still-current
-                // frame pool.
+                // WGC may publish a final callback while a window is closing,
+                // resizing, or being replaced. A single source-frame failure
+                // must not tear down the shared DirectComposition surface: the
+                // last complete swap-chain frame remains valid and a later
+                // callback or reconciliation pass can recover this source.
                 if (active && captureSourceByPool.ContainsKey(sender))
                 {
-                    Volatile.Write(
-                        ref captureFailure,
-                        $"GPU 捕获帧处理失败：{exception.Message}");
+                    _ = exception;
+                    Interlocked.Increment(ref recoverableCaptureFailureCount);
                 }
             }
         }
@@ -1111,6 +1145,7 @@ internal sealed class GpuPortalOverlay : IDisposable
             source => source.Window);
         var addedSources = new List<CaptureSource>();
         var sourcesCommitted = false;
+        var guardUpdated = false;
         try
         {
             foreach (var resolvedHandle in resolvedHandles)
@@ -1144,9 +1179,15 @@ internal sealed class GpuPortalOverlay : IDisposable
 
             if (!foregroundGuard.TryUpdateSources(resolvedHandles, out error))
             {
-                RemovePendingSources(addedSources);
-                return false;
+                RemovePendingSourcesNoThrow(addedSources);
+                Interlocked.Increment(ref sourceReconciliationRetryCount);
+                // The current capture list and last complete composition are
+                // still usable. Retry the replacement later without exposing
+                // the protected foreground window for a transient guard race.
+                error = null;
+                return true;
             }
+            guardUpdated = true;
 
             CaptureSource[] removedSources;
             lock (gpuLock)
@@ -1193,7 +1234,16 @@ internal sealed class GpuPortalOverlay : IDisposable
             foreach (var removedSource in removedSources)
             {
                 removedSource.FramePool.FrameArrived -= OnFrameArrived;
-                removedSource.Dispose();
+                try
+                {
+                    removedSource.Dispose();
+                }
+                catch
+                {
+                    // The source has already been detached from the active
+                    // frame-pool map. Disposal races cannot invalidate the
+                    // committed replacement or its last presented frame.
+                }
             }
 
             if (removedSources.Length > 0)
@@ -1211,14 +1261,26 @@ internal sealed class GpuPortalOverlay : IDisposable
         {
             if (!sourcesCommitted)
             {
-                RemovePendingSources(addedSources);
+                RemovePendingSourcesNoThrow(addedSources);
+                if (guardUpdated)
+                {
+                    _ = foregroundGuard.TryUpdateSources(
+                        currentHandles,
+                        out _);
+                }
             }
-            error = $"GPU 动态来源补位失败：{exception.Message}";
-            return false;
+            _ = exception;
+            Interlocked.Increment(ref sourceReconciliationRetryCount);
+            // Dynamic backfill is an optional in-session repair. Its failure
+            // is recoverable while an already-presented composition exists.
+            // Keep that frame visible and retry on the next scheduled pass.
+            error = null;
+            return true;
         }
     }
 
-    private void RemovePendingSources(IReadOnlyList<CaptureSource> sources)
+    private void RemovePendingSourcesNoThrow(
+        IReadOnlyList<CaptureSource> sources)
     {
         lock (gpuLock)
         {
@@ -1227,8 +1289,16 @@ internal sealed class GpuPortalOverlay : IDisposable
 
         foreach (var source in sources)
         {
-            source.FramePool.FrameArrived -= OnFrameArrived;
-            source.Dispose();
+            try
+            {
+                source.FramePool.FrameArrived -= OnFrameArrived;
+                source.Dispose();
+            }
+            catch
+            {
+                // Best-effort cleanup for capture sessions that never became
+                // part of the committed source set.
+            }
         }
     }
 

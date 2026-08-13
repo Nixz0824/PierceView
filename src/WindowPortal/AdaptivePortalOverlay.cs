@@ -78,6 +78,24 @@ internal sealed class AdaptivePortalOverlay : IDisposable
         _ => 0,
     };
 
+    internal int RecoverableCaptureFailureCount => activeBackend switch
+    {
+        ActiveBackend.Gpu => gpuOverlay?.RecoverableCaptureFailureCount ?? 0,
+        _ => 0,
+    };
+
+    internal int RecoverableUpdateFailureCount => activeBackend switch
+    {
+        ActiveBackend.Gpu => gpuOverlay?.RecoverableUpdateFailureCount ?? 0,
+        _ => 0,
+    };
+
+    internal int SourceReconciliationRetryCount => activeBackend switch
+    {
+        ActiveBackend.Gpu => gpuOverlay?.SourceReconciliationRetryCount ?? 0,
+        _ => 0,
+    };
+
     internal IReadOnlyList<nint> SourceWindows => activeBackend switch
     {
         ActiveBackend.Gpu => gpuOverlay?.SourceWindows ?? Array.Empty<nint>(),

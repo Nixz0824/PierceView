@@ -2,7 +2,10 @@ param(
     [Parameter(Mandatory = $true)]
     [Int64]$ChatGptWindow,
 
-    [string]$PortalExecutable
+    [string]$PortalExecutable,
+
+    [ValidateRange(3000, 120000)]
+    [int]$StabilityDurationMilliseconds = 30000
 )
 
 $ErrorActionPreference = 'Stop'
@@ -340,7 +343,7 @@ try {
             '--multilayer-probe-hwnd',
             "0x$($ChatGptWindow.ToString('X'))",
             '--probe-duration-ms',
-            '3200') `
+            ([string]($StabilityDurationMilliseconds + 2500))) `
         -WindowStyle Hidden `
         -PassThru `
         -RedirectStandardOutput $portalOutput `
@@ -399,9 +402,15 @@ try {
     $purpleVisible = $false
     $invalidTransitionFrameCount = 0
     $visiblePortalCountMaximum = 0
+    $stabilitySampleCount = 0
     $afterPixel = $beforePixel
-    for ($sample = 0; $sample -lt 180; $sample++) {
+    $stabilityDeadline = [System.Diagnostics.Stopwatch]::GetTimestamp() +
+        [int64](
+            ($StabilityDurationMilliseconds / 1000.0) *
+            [System.Diagnostics.Stopwatch]::Frequency)
+    while ([System.Diagnostics.Stopwatch]::GetTimestamp() -lt $stabilityDeadline) {
         Start-Sleep -Milliseconds 10
+        $stabilitySampleCount++
         $afterPixel = Get-ScreenPixel $sampleX $sampleY
         $isYellow = Test-ColorNear `
             $afterPixel `
@@ -429,9 +438,6 @@ try {
                 [uint32]$portalProcess.Id,
                 2000,
                 1000))
-        if ($purpleVisible -and $sample -ge 40) {
-            break
-        }
     }
 
     Save-PortalScreenshot `
@@ -453,7 +459,7 @@ try {
     $portalLogText = [string](Get-Content -LiteralPath $portalOutput -Raw)
     $reconciliationMatch = [regex]::Match(
         $portalLogText,
-        '动态来源协调：次数=(\d+)，新建捕获=(\d+)，显示定位=(\d+)，最终来源=([^。]+)')
+        '动态来源协调：次数=(\d+)，新建捕获=(\d+)，保帧重试=(\d+)，已隔离帧异常=(\d+)，已隔离更新异常=(\d+)，显示定位=(\d+)，最终来源=([^。]+)')
     $reconciliationCount = if ($reconciliationMatch.Success) {
         [int]$reconciliationMatch.Groups[1].Value
     }
@@ -462,12 +468,24 @@ try {
         [int]$reconciliationMatch.Groups[2].Value
     }
     else { 0 }
-    $displayPlacementCount = if ($reconciliationMatch.Success) {
+    $retryCount = if ($reconciliationMatch.Success) {
         [int]$reconciliationMatch.Groups[3].Value
     }
     else { 0 }
+    $isolatedFrameFailureCount = if ($reconciliationMatch.Success) {
+        [int]$reconciliationMatch.Groups[4].Value
+    }
+    else { 0 }
+    $isolatedUpdateFailureCount = if ($reconciliationMatch.Success) {
+        [int]$reconciliationMatch.Groups[5].Value
+    }
+    else { 0 }
+    $displayPlacementCount = if ($reconciliationMatch.Success) {
+        [int]$reconciliationMatch.Groups[6].Value
+    }
+    else { 0 }
     $finalSources = if ($reconciliationMatch.Success) {
-        $reconciliationMatch.Groups[4].Value
+        $reconciliationMatch.Groups[7].Value
     }
     else { '' }
     $finalSourceHandles = @($finalSources -split ',' | Where-Object { $_ })
@@ -488,6 +506,8 @@ try {
     Write-Output "YELLOW_INITIALLY_VISIBLE=$yellowInitiallyVisible"
     Write-Output "PURPLE_REPLACEMENT_VISIBLE=$purpleVisible"
     Write-Output "INVALID_TRANSITION_FRAMES=$invalidTransitionFrameCount"
+    Write-Output "STABILITY_DURATION_MS=$StabilityDurationMilliseconds"
+    Write-Output "STABILITY_SAMPLE_COUNT=$stabilitySampleCount"
     Write-Output "VISIBLE_PORTAL_COUNT_MAX=$visiblePortalCountMaximum"
     Write-Output "YELLOW_NOACTIVATE=$yellowHadNoActivate"
     Write-Output "PURPLE_INITIALLY_UNGUARDED=$purpleInitiallyUnguarded"
@@ -498,6 +518,9 @@ try {
     Write-Output "FOREGROUND_STAYED_UNCHANGED=$foregroundStayedUnchanged"
     Write-Output "RECONCILIATION_COUNT=$reconciliationCount"
     Write-Output "REPLACEMENT_COUNT=$replacementCount"
+    Write-Output "FAIL_SOFT_RETRY_COUNT=$retryCount"
+    Write-Output "ISOLATED_FRAME_FAILURE_COUNT=$isolatedFrameFailureCount"
+    Write-Output "ISOLATED_UPDATE_FAILURE_COUNT=$isolatedUpdateFailureCount"
     Write-Output "DISPLAY_PLACEMENT_COUNT=$displayPlacementCount"
     Write-Output "FINAL_SOURCE_COUNT=$($finalSourceHandles.Count)"
     Write-Output "PURPLE_IN_FINAL_SOURCES=$purpleInFinalSources"

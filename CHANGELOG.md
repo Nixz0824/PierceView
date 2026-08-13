@@ -6,6 +6,15 @@ This project follows [Semantic Versioning](https://semver.org/). User-facing cha
 
 ## [Unreleased]
 
+### 2.3.0-multilayer-alpha.7 (local experimental build)
+
+- 修复多层透视会话偶尔短暂消失并露出宿主应用画面：单个 WGC 来源的瞬时抓帧异常不再标记为整套 GPU 会话永久失败，而是继续显示上一张完整有效合成帧并等待后续帧恢复。
+- Fix the multilayer portal occasionally disappearing and exposing the host application. A transient frame failure from one WGC source no longer permanently fails the entire GPU session; the last complete composition stays visible while a later source frame recovers.
+- 动态补位创建或窗口守卫同步若遇到短暂竞态，回滚尚未提交的新来源并在下一轮重试，不再触发 GPU 隐藏、CPU 切换或宿主破洞恢复；已成功显示的 DirectComposition 表面始终保留。
+- If capture creation or window-guard synchronization hits a transient reconciliation race, roll back only the uncommitted replacement and retry later instead of hiding GPU output, switching to CPU, or restoring the host aperture. The already-presented DirectComposition surface remains visible.
+- 将动态来源关闭补位探针扩展为默认 30 秒连续取样，并记录保帧重试、隔离帧异常、隔离更新异常、异常过渡画面和显示窗口数量，覆盖短时测试不易捕捉的偶发闪现。
+- Extend the dynamic close-and-backfill probe to 30 seconds of continuous sampling by default, recording fail-soft retries, isolated frame/update errors, invalid transition images, and visible display-window count to catch intermittent flashes missed by short tests.
+
 ### 2.3.0-multilayer-alpha.6 (local experimental build)
 
 - F8 会话不再把启动时识别到的后台应用固定为一次性快照：每 75 ms 检查当前来源是否仍然有效，关闭或最小化任意已捕获窗口后，从更深层候选中自动补齐，仍严格限制为最多 `-1` 至 `-4`。
